@@ -38,3 +38,21 @@ Two reviewers independently flagged that `csvQuote` (previously lines 696-702) o
 **Verification:** extracted the `<script>` body to a temp file in the scratchpad and ran `node --check` — passed. Also copied the standalone `csvQuote` function into a scratch script and confirmed: `csvQuote("=1+1")` → `'=1+1`, `csvQuote("+cmd")` → `'+cmd`, `csvQuote("-2")` → `'-2`, `csvQuote("@SUM(1)")` → `'@SUM(1)`, while `csvQuote("normal, value")` still correctly quotes as `"normal, value"` and `csvQuote("plain")` is untouched.
 
 Only `web/index.html` was edited; no commit or deploy was made.
+
+## Rebrand — "Analyst" hero identity (2026-08-04)
+
+Rebranded the UI in place: name changed from "FREED Data Chat" to **Analyst**, tagline "Ask. Analyze. Answer." Persona is a friendly data superhero, expressed through an original inline-SVG emblem (never copying any real trademark) — a rounded shield/crest with a small speech-bubble-style tail at its point, three ascending bar-chart bars inside (rendered in the `--surface` color so they read as a "data readout" on the shield), and a gold lightning-bolt spark across the top-right, symbolizing the hero's "power". The same emblem (three separate `<svg>` instances, one per gradient `id` to avoid DOM id collisions) is used in the login card, the chat header, and the empty-state icon, each wrapped in an `.emblem` class that adds a soft cyan glow (`drop-shadow`, animated with a slow pulse, disabled under `prefers-reduced-motion: reduce`).
+
+Theme: deep midnight/indigo hero backdrop (`--bg:#0a0e1f` dark / `#eef1fb` light) with an electric-teal/cyan accent (`--accent:#0c7d93` dark / `#0e7490` light — both verified ≥4.5:1 contrast for white text used in buttons/user-bubbles) plus a decorative brighter cyan glow token (`--accent-glow`) and a gold spark token (`--accent2`) used only for the emblem's bolt, never behind text. Added a subtle CSS-only starfield (several tiny radial-gradient dots at low opacity) and a soft radial "spotlight" gradient behind the login card/header, both purely decorative `body::before`/`::after` layers with `pointer-events:none`. Kept both a light and a dark theme (original file already supported `prefers-color-scheme: dark`; added `:root[data-theme="dark"/"light"]` overrides too so an in-page theme toggle, if one is ever wired up, would work) — dark is the primary/showcase hero look.
+
+Copy updates: `<title>` → "Analyst"; login heading → "Analyst" with the new tagline; chat header product name → "Analyst"; empty-state heading → "Analyst at your service — what data can I dig up?" (example chips left with their original text as instructed); added a small footer line "Analyst — your data superhero" under the composer; CSV download filename changed from `freed-data-<timestamp>.csv` to `analyst-<timestamp>.csv` (a plain string literal change only). Added `*:focus-visible` outline styling (uses `--accent-glow`) for keyboard-accessibility across buttons/inputs/chips.
+
+**Explicitly not touched:** all `fetch` calls and endpoints (`/api/login`, `/api/chat`), the markdown renderer (`escapeHtml`/`renderInline`/`renderMarkdown`/table-splitting helpers), the CSV formula-injection guard in `csvQuote`, and table-card rendering logic — verified byte-for-byte identical against the pre-rebrand version aside from the filename-prefix string.
+
+**Verification:**
+- Extracted the `<script>` body to `/private/tmp/.../scratchpad/extracted.js` and ran `node --check` — passed, no syntax errors.
+- `grep -nE 'https?://|@import|<script[^>]+src=|<img[^>]+src="http'` over the file — zero matches outside the required inline `xmlns="http://www.w3.org/2000/svg"` SVG namespace attributes, confirming no external assets/CDNs/network requests were introduced.
+- Served the file locally (`python3 -m http.server`, not deployed) and rendered it in the browser preview pane: confirmed the emblem, login card, empty state, tagline, footer, and CSS starfield/spotlight all render correctly in the dark hero theme, and reflowed cleanly at a 375×812 mobile viewport.
+- Diffed against the pre-rebrand file to confirm the `/api/login` and `/api/chat` fetch blocks, the markdown renderer, `csvQuote`, and table-card builder are unchanged except for the CSV filename prefix string.
+
+No commit was made and nothing was deployed.
