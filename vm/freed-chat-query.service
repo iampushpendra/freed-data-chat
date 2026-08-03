@@ -1,0 +1,24 @@
+[Unit]
+Description=Freed Data Chat – query API (single-statement SELECT/WITH over Postgres warehouse)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/freed-data-chat
+EnvironmentFile=/etc/freed/chat-query.env
+ExecStart=/usr/bin/python3 /home/ubuntu/freed-data-chat/query_api.py
+Restart=always
+RestartSec=5
+
+# Basic hardening. This process only needs to read /etc/freed/chat-query.env,
+# read/write its own audit log in WorkingDirectory, and open a TCP listener
+# on BIND_HOST:BIND_PORT (default 127.0.0.1:8158) — no need for elevated
+# privileges or broad filesystem access.
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
