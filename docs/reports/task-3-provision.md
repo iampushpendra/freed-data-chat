@@ -85,3 +85,45 @@
   written by a parallel agent); `setup.sh`'s existence check and
   `deploy_vm.sh`'s scp both assume it lands at `vm/query_api.py` in the repo
   before deploy is actually run.
+
+## Review fixes applied
+
+- **IMPORTANT — secret leak on every re-run (`vm/setup.sh`)**: the old
+  bottom-of-script block unconditionally re-read `QUERY_API_SECRET` from
+  `$ENV_FILE` via `sudo grep` and printed it, regardless of which branch of
+  the "env file already exists?" check had run. Since `deploy_vm.sh` invokes
+  `setup.sh` on every deploy, this put the live secret into terminal
+  scrollback / deploy logs on every single re-run, not just first creation.
+  Fixed: the secret is now printed only inside the fresh-creation (`else`)
+  branch, immediately after `QUERY_API_SECRET=$(openssl rand -hex 32)` is
+  generated and written. The "already exists" branch now prints
+  `QUERY_API_SECRET already set (not printed)` and nothing sensitive. Also
+  deleted the dead no-op `if grep -q '^QUERY_API_SECRET=' "$ENV_FILE" ...; then :; fi`
+  block that preceded the old print.
+- **IMPORTANT — AUDIT_LOG mismatch (`vm/chat-query.env.example`)**: removed
+  the `AUDIT_LOG=/home/ubuntu/freed-data-chat/chat-query.log` line. The
+  contract's env list (`docs/CONTRACTS.md`) does not include `AUDIT_LOG`,
+  and `setup.sh` never seeded it; `query_api.py` already defaults it to the
+  contract path when unset, so the documented example now matches the
+  contract exactly and `setup.sh` was left unchanged (no seeding added).
+- **MINOR — role-name overclaim (`vm/nginx-chatquery.conf`)**: the
+  access-control comment asserted the query runs "as the `chat_ro` Postgres
+  role," but provisioning copies `PG_USER` verbatim from `settlement.env`,
+  which is `freedbi_user`. Hedged the wording to "a read-only Postgres role
+  (freedbi_user/chat_ro)" so the comment doesn't assert a specific role name
+  the provisioning flow doesn't guarantee.
+- **MINOR — redundant restart (`scripts/deploy_vm.sh`)**: removed the
+  standalone `ssh ... "sudo systemctl restart freed-chat-query"` step (old
+  step 4); `setup.sh` already installs, enables, and restarts the unit in
+  its own "systemd unit" step, making the second restart redundant.
+  Renumbered the healthz-verification step to step 4 and updated the
+  top-of-file comment to say setup.sh owns the restart. The healthz
+  verification from the Mac is unchanged.
+
+## Verification
+
+- `bash -n vm/setup.sh` — clean.
+- `bash -n scripts/deploy_vm.sh` — clean.
+- No files other than `vm/setup.sh`, `vm/nginx-chatquery.conf`,
+  `vm/chat-query.env.example`, and `scripts/deploy_vm.sh` were touched; no
+  git commit made; no ssh/deploy performed.

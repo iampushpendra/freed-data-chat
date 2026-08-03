@@ -3,6 +3,6 @@
     { "source": "/", "destination": "/web/index.html" }
   ],
   "functions": {
-    "api/chat.js": { "maxDuration": 60 }
+    "api/chat.js": { "maxDuration": 60, "includeFiles": "context/schema.md" }
   }
 }

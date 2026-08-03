@@ -80,6 +80,25 @@ class TestValidateSqlAllowed(unittest.TestCase):
     def test_into_inside_string_allowed(self):
         self.assertAllowed("SELECT * FROM t WHERE note = 'copy into folder'")
 
+    def test_lo_prefixed_column_name_without_call_allowed(self):
+        # A column merely named lo_balance (no function call) must not trip
+        # the lo_ prefix denylist -- only lo_<ident>( call syntax is banned.
+        self.assertAllowed('SELECT lo_balance FROM accounts')
+
+    def test_single_char_string_ending_in_e_allowed(self):
+        # A plain (non-E-prefixed) string literal whose content happens to
+        # be the letter E must not be mistaken for an E'' escape-string
+        # prefix.
+        self.assertAllowed("SELECT * FROM t WHERE code = 'E'")
+
+    def test_backslash_in_plain_string_allowed(self):
+        # Backslashes are not escape characters in ordinary '' strings (only
+        # in E'' strings), so this LIKE pattern is just a plain string.
+        self.assertAllowed(r"SELECT * FROM t WHERE name LIKE 'a\_b'")
+
+    def test_json_column_name_current_setting_like_but_not_call(self):
+        self.assertAllowed('SELECT current_setting_flag FROM t')
+
 
 class TestValidateSqlRejected(unittest.TestCase):
     def assertRejected(self, sql):
@@ -186,6 +205,61 @@ class TestValidateSqlRejected(unittest.TestCase):
     def test_pg_cancel_backend(self):
         self.assertRejected('SELECT pg_cancel_backend(123)')
 
+    def test_set_config(self):
+        self.assertRejected("SELECT set_config('statement_timeout', '0', false)")
+
+    def test_set_config_read_only_off(self):
+        self.assertRejected(
+            "SELECT set_config('transaction_read_only', 'off', false), 1")
+
+    def test_current_setting(self):
+        self.assertRejected("SELECT current_setting('statement_timeout')")
+
+    def test_lo_read(self):
+        self.assertRejected('SELECT lo_read(0, 0, 100)')
+
+    def test_lo_get(self):
+        self.assertRejected('SELECT lo_get(12345)')
+
+    def test_lo_open(self):
+        self.assertRejected('SELECT lo_open(12345, 0)')
+
+    def test_lo_creat(self):
+        self.assertRejected('SELECT lo_creat(-1)')
+
+    def test_lo_from_bytea(self):
+        self.assertRejected("SELECT lo_from_bytea(0, '\\x00')")
+
+    def test_loread(self):
+        self.assertRejected('SELECT loread(0, 100)')
+
+    def test_lowrite(self):
+        self.assertRejected("SELECT lowrite(0, '\\x00')")
+
+    def test_pg_read_binary_file(self):
+        self.assertRejected("SELECT pg_read_binary_file('/etc/passwd')")
+
+    def test_pg_stat_file(self):
+        self.assertRejected("SELECT pg_stat_file('/etc/passwd')")
+
+    def test_estring_prefix_uppercase(self):
+        self.assertRejected("SELECT E'hello'")
+
+    def test_estring_prefix_lowercase(self):
+        self.assertRejected("SELECT e'hello'")
+
+    def test_estring_statement_smuggling_exploit(self):
+        # Verified exploit: a naive '' scanner does not know E'' strings
+        # honor backslash escapes, so \' does not close the string the way
+        # Postgres's real parser sees it -- letting a second statement slip
+        # past the single-statement check. E-strings are rejected outright,
+        # which closes this regardless of scanner precision.
+        self.assertRejected(
+            "SELECT E'\\''; SELECT pg_terminate_backend(12345); --'")
+
+    def test_estring_with_double_backslash(self):
+        self.assertRejected(r"SELECT E'a\\b'")
+
     def test_does_not_start_with_select_or_with(self):
         self.assertRejected('EXPLAIN SELECT 1')
 
@@ -257,6 +331,20 @@ class TestJsonSafe(unittest.TestCase):
             def __str__(self):
                 return 'weird-value'
         self.assertEqual(json_safe(Weird()), 'weird-value')
+
+    def test_dict_passthrough(self):
+        # psycopg2 already decodes json/jsonb columns into a plain dict --
+        # it must be returned as-is, not stringified into a Python repr.
+        value = {'a': 1, 'b': [1, 2]}
+        result = json_safe(value)
+        self.assertEqual(result, value)
+        self.assertIsInstance(result, dict)
+
+    def test_list_passthrough(self):
+        value = [1, 'two', {'three': 3}]
+        result = json_safe(value)
+        self.assertEqual(result, value)
+        self.assertIsInstance(result, list)
 
 
 if __name__ == '__main__':

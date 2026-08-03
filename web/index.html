@@ -695,6 +695,12 @@
   // ---------------- CSV export ----------------
   function csvQuote(v){
     var s = (v === null || v === undefined) ? '' : String(v);
+    // Neutralize spreadsheet formula injection (OWASP CSV injection guard):
+    // if the cell starts with a char Excel/Sheets treats as a formula/command
+    // trigger, prefix with an apostrophe so it round-trips as inert text.
+    if(/^[=+\-@\t\r]/.test(s)){
+      s = "'" + s;
+    }
     if(/[",\n\r]/.test(s)){
       s = '"' + s.replace(/"/g, '""') + '"';
     }

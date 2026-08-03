@@ -8,4 +8,7 @@ Wave 1 (parallel implementers, disjoint files, no commits):
 - Task 5: api/*.js + vercel.json + package.json — dispatched
 - Task 6: README + e2e + set_vercel_env — dispatched
 
-Wave 2: parallel reviewers per area. Wave 3 (controller): commit, provision VM, vercel deploy + env, E2E.
+Wave 1: committed fdfcc13.
+Wave 2 reviews done. Findings: 1 Critical (chat empty reply on backend-down), Important: validator set_config/lo_* gaps + 401 not audited; timeout budget >60s; CSV formula injection; setup.sh secret re-echo; login.js no try/catch. No XSS, no core validator bypass, auth solid.
+Wave 3 fix wave (parallel, disjoint files) dispatched from BASE fdfcc13: query_api validator, chat.js/vercel.json, web csv, setup.sh/nginx/deploy.
+Wave 4 (controller): commit fixes, provision VM, vercel env+deploy, E2E.

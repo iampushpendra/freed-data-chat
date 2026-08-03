@@ -73,6 +73,10 @@ ROW_CAP = int(os.getenv('ROW_CAP', '2000'))
 STATEMENT_TIMEOUT = os.getenv('STATEMENT_TIMEOUT', '60s')
 BIND_HOST = os.getenv('BIND_HOST', '127.0.0.1')
 BIND_PORT = int(os.getenv('BIND_PORT', '8158'))
+# Default is relative on purpose: the systemd unit (freed-chat-query.service)
+# sets WorkingDirectory=/home/ubuntu/freed-data-chat, so './chat-query.log'
+# resolves to the contract's fixed path (docs/CONTRACTS.md) without hardcoding
+# it here. AUDIT_LOG remains overridable via the env file.
 AUDIT_LOG = os.getenv('AUDIT_LOG', './chat-query.log')
 
 _audit_lock = threading.Lock()
@@ -107,8 +111,10 @@ FORBIDDEN_KEYWORDS = (
 )
 
 FORBIDDEN_FUNCTIONS = (
-    'pg_sleep', 'dblink', 'pg_read_file', 'pg_ls_dir', 'lo_import',
-    'lo_export', 'pg_terminate_backend', 'pg_cancel_backend',
+    'pg_sleep', 'dblink', 'pg_read_file', 'pg_read_binary_file',
+    'pg_stat_file', 'pg_ls_dir', 'lo_import', 'lo_export',
+    'pg_terminate_backend', 'pg_cancel_backend', 'set_config',
+    'current_setting',
 )
 
 _FORBIDDEN_KEYWORD_RES = [re.compile(r'\b' + kw + r'\b', re.IGNORECASE)
@@ -117,26 +123,47 @@ _FORBIDDEN_FUNCTION_RES = [re.compile(r'\b' + fn + r'\b', re.IGNORECASE)
                             for fn in FORBIDDEN_FUNCTIONS]
 _FIRST_KEYWORD_RE = re.compile(r'^\s*(SELECT|WITH)\b', re.IGNORECASE)
 
+# The enumerated FORBIDDEN_FUNCTIONS list above only names the large-object
+# write/export pair (lo_import/lo_export) explicitly, but Postgres exposes a
+# whole family of lo_* primitives (lo_read, lo_get, lo_open, lo_creat,
+# lo_from_bytea, ...) that can read/exfiltrate large-object data without ever
+# touching the filesystem. Reject the prefix generally, plus the two legacy
+# large-object aliases that don't follow the lo_ naming convention.
+_LO_PREFIX_RE = re.compile(r'\blo_[a-z_]*\s*\(', re.IGNORECASE)
+_LOREAD_LOWRITE_RE = re.compile(r'\b(loread|lowrite)\b', re.IGNORECASE)
+
 
 def _skeletonize(sql):
     """Strip comments and quoted literals, producing a bare "skeleton" safe
-    to run keyword/semicolon checks against.
+    to run keyword/semicolon checks against. Returns (skeleton, has_estring).
 
     Line comments (--...) and block comments (/* ... */, nesting supported)
     are removed entirely (not replaced with a space) so that a comment used
     to split a keyword rejoins correctly, e.g. 'SEL/**/ECT' skeletonizes to
     'SELECT' — which is still just a plain SELECT and must be allowed.
 
-    Single-quoted strings ('' escapes), double-quoted identifiers (""
-    escapes), and dollar-quoted strings ($tag$...$tag$) are replaced with a
-    single space each — their contents (which could contain anything,
-    including semicolons or forbidden keywords) must never reach the keyword
-    checks, but the literal already sits inside surrounding SQL whitespace/
+    Single-quoted strings, double-quoted identifiers (\"\" escapes), and
+    dollar-quoted strings ($tag$...$tag$) are replaced with a single space
+    each — their contents (which could contain anything, including
+    semicolons or forbidden keywords) must never reach the keyword checks,
+    but the literal already sits inside surrounding SQL whitespace/
     punctuation so a single space is a safe stand-in.
+
+    Plain '' strings only recognize '' as an escaped quote. PostgreSQL
+    `E'...'` strings additionally treat a backslash as an escape character
+    (so `\\'` does not close the string), which a naive '' scanner does not
+    know about — that mismatch between this lexer and Postgres's real parser
+    is exactly the kind of desync that can smuggle a second statement past
+    the single-statement check. This scanner detects an E'/e' string prefix
+    (word-boundary before the E) and, for that literal only, honors
+    backslash escapes while scanning past it. Callers reject the query
+    outright whenever `has_estring` comes back true (E-strings are simply
+    not needed for the read-only analytics queries this API accepts).
     """
     out = []
     i = 0
     n = len(sql)
+    has_estring = False
     while i < n:
         c = sql[i]
 
@@ -164,8 +191,17 @@ def _skeletonize(sql):
             continue
 
         if c == "'":
+            is_estring = False
+            if i > 0 and sql[i - 1] in ('E', 'e'):
+                prev2 = sql[i - 2] if i >= 2 else ''
+                if not (prev2.isalnum() or prev2 == '_'):
+                    is_estring = True
+                    has_estring = True
             i += 1
             while i < n:
+                if is_estring and sql[i] == '\\':
+                    i += 2
+                    continue
                 if sql[i] == "'":
                     if sql[i:i + 2] == "''":
                         i += 2
@@ -208,7 +244,7 @@ def _skeletonize(sql):
         out.append(c)
         i += 1
 
-    return ''.join(out)
+    return ''.join(out), has_estring
 
 
 def validate_sql(sql):
@@ -217,7 +253,10 @@ def validate_sql(sql):
     if sql is None or not str(sql).strip():
         return 'empty query'
 
-    skeleton = _skeletonize(sql)
+    skeleton, has_estring = _skeletonize(sql)
+
+    if has_estring:
+        return "E'' escape-string literals are not allowed"
 
     body = skeleton.strip()
     if body.endswith(';'):
@@ -236,6 +275,12 @@ def validate_sql(sql):
         if rx.search(skeleton):
             return f'forbidden function: {rx.pattern[2:-2]}'
 
+    if _LO_PREFIX_RE.search(skeleton):
+        return 'forbidden function: lo_*'
+
+    if _LOREAD_LOWRITE_RE.search(skeleton):
+        return 'forbidden function: loread/lowrite'
+
     return None
 
 
@@ -252,6 +297,11 @@ def json_safe(value):
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float, str)):
+        return value
+    if isinstance(value, (dict, list)):
+        # psycopg2 already decodes json/jsonb columns into plain dict/list
+        # (and array columns into list) — these are already JSON-safe and
+        # must be passed through, not stringified into a Python repr.
         return value
     if isinstance(value, Decimal):
         return float(value)
@@ -365,6 +415,25 @@ class Handler(BaseHTTPRequestHandler):
             return fwd.split(',')[0].strip()
         return self.client_address[0]
 
+    def _drain_body(self, n):
+        """Read and discard up to `n` already-announced Content-Length bytes
+        before writing an error response. On a keep-alive (HTTP/1.1)
+        connection, writing a response without first consuming the body the
+        client already sent leaves those bytes sitting in the socket buffer;
+        the server then misparses them as the start of the next request
+        line, corrupting framing for the next request on the same
+        connection. If draining fails partway, force the connection closed
+        instead of leaving it in an unknown state."""
+        remaining = n
+        try:
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except Exception:
+            self.close_connection = True
+
     def do_GET(self):
         if self.path.split('?')[0] == '/healthz':
             up = db_healthcheck()
@@ -372,52 +441,78 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {'error': 'not found'})
 
     def do_POST(self):
-        if self.path.split('?')[0] != '/query':
-            return self._send(404, {'error': 'not found'})
-        if not self._authed():
-            return self._send(401, {'error': 'unauthorized'})
+        t0 = time.time()
+        path = self.path.split('?')[0]
+        remote_ip = self._client_ip()
 
-        req_id = uuid.uuid4().hex[:12]
+        def elapsed_ms():
+            return int((time.time() - t0) * 1000)
+
         try:
             n = int(self.headers.get('Content-Length') or 0)
         except ValueError:
+            # Length is unknown, so it can't be safely drained -- force the
+            # connection closed rather than leave keep-alive framing in an
+            # ambiguous state.
+            self.close_connection = True
             return self._send(400, {'error': 'bad Content-Length'})
+
+        if path != '/query':
+            self._drain_body(n)
+            return self._send(404, {'error': 'not found'})
+
+        if not self._authed():
+            self._drain_body(n)
+            audit({'ts': datetime.now(timezone.utc).isoformat(),
+                   'remote_ip': remote_ip, 'path': path,
+                   'outcome': 'unauthorized', 'elapsed_ms': elapsed_ms()})
+            return self._send(401, {'error': 'unauthorized'})
+
+        req_id = uuid.uuid4().hex[:12]
+
         if n > 1 * 1024 * 1024:
+            self._drain_body(n)
+            audit({'ts': datetime.now(timezone.utc).isoformat(), 'req_id': req_id,
+                   'error': 'body too large', 'stage': 'validate',
+                   'elapsed_ms': elapsed_ms(), 'remote_ip': remote_ip})
             return self._send(400, {'error': 'body too large'})
 
         try:
             payload = json.loads(self.rfile.read(n) or b'{}')
         except Exception:
+            audit({'ts': datetime.now(timezone.utc).isoformat(), 'req_id': req_id,
+                   'error': 'body must be JSON', 'stage': 'validate',
+                   'elapsed_ms': elapsed_ms(), 'remote_ip': remote_ip})
             return self._send(400, {'error': 'body must be JSON'})
 
         sql = payload.get('sql') if isinstance(payload, dict) else None
         if not isinstance(sql, str):
+            audit({'ts': datetime.now(timezone.utc).isoformat(), 'req_id': req_id,
+                   'error': '"sql" must be a string', 'stage': 'validate',
+                   'elapsed_ms': elapsed_ms(), 'remote_ip': remote_ip})
             return self._send(400, {'error': '"sql" must be a string'})
 
         err = validate_sql(sql)
         if err:
             audit({'ts': datetime.now(timezone.utc).isoformat(), 'req_id': req_id,
                    'sql': sql, 'error': err, 'stage': 'validate',
-                   'remote_ip': self._client_ip()})
+                   'elapsed_ms': elapsed_ms(), 'remote_ip': remote_ip})
             return self._send(400, {'error': err})
 
-        t0 = time.time()
         try:
             result = run_query(sql)
         except Exception as e:
-            elapsed_ms = int((time.time() - t0) * 1000)
             msg = str(e).strip() or type(e).__name__
             audit({'ts': datetime.now(timezone.utc).isoformat(), 'req_id': req_id,
                    'sql': sql, 'error': msg, 'stage': 'execute',
-                   'elapsed_ms': elapsed_ms, 'remote_ip': self._client_ip()})
+                   'elapsed_ms': elapsed_ms(), 'remote_ip': remote_ip})
             return self._send(422, {'error': msg})
 
-        elapsed_ms = int((time.time() - t0) * 1000)
-        result['elapsed_ms'] = elapsed_ms
+        result['elapsed_ms'] = elapsed_ms()
         audit({'ts': datetime.now(timezone.utc).isoformat(), 'req_id': req_id,
                'sql': sql, 'row_count': result['row_count'],
-               'truncated': result['truncated'], 'elapsed_ms': elapsed_ms,
-               'remote_ip': self._client_ip()})
+               'truncated': result['truncated'], 'elapsed_ms': result['elapsed_ms'],
+               'remote_ip': remote_ip})
         return self._send(200, result)
 
 

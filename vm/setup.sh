@@ -28,6 +28,7 @@ echo "--- 2. /etc/freed/chat-query.env ---"
 sudo mkdir -p /etc/freed
 if [ -f "$ENV_FILE" ]; then
   echo "$ENV_FILE already exists — leaving it untouched (never overwrite)"
+  echo "QUERY_API_SECRET already set (not printed)"
 else
   if [ ! -f "$SETTLEMENT_ENV" ]; then
     echo "ERROR: $SETTLEMENT_ENV not found — cannot seed PG_* values." >&2
@@ -67,6 +68,11 @@ ENV
 
   sudo mv "$TMP_ENV" "$ENV_FILE"
   echo "created $ENV_FILE (seeded PG_* from settlement.env, generated a new QUERY_API_SECRET)"
+  echo ""
+  echo "QUERY_API_SECRET (copy this into Vercel env as QUERY_API_SECRET, shown once here):"
+  echo "  $QUERY_API_SECRET"
+  echo ""
+  echo "This is a fresh env file — do this now, it will not be printed again by this script."
 fi
 
 echo "--- 3. Lock down env file perms ---"
@@ -102,11 +108,3 @@ echo ""
 
 echo ""
 echo "=== Setup complete ==="
-if grep -q '^QUERY_API_SECRET=' "$ENV_FILE" 2>/dev/null; then
-  :
-fi
-CURRENT_SECRET=$(sudo grep -E '^QUERY_API_SECRET=' "$ENV_FILE" | head -n1 | cut -d= -f2-)
-echo "QUERY_API_SECRET (copy this into Vercel env as QUERY_API_SECRET, shown once here):"
-echo "  $CURRENT_SECRET"
-echo ""
-echo "If this is a fresh env file, do this now — it will not be printed again by this script."

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run ON THE MAC. Copies the query API + provisioning assets to the VM,
-# runs setup.sh there, restarts the service, and verifies healthz from
-# outside the VM.
+# runs setup.sh there (which installs/restarts the service and nginx
+# vhost), and verifies healthz from outside the VM.
 set -euo pipefail
 
 SSH_KEY="$HOME/installs/keys/freed-live-gcp.pem"
@@ -35,10 +35,7 @@ scp "${SSH_OPTS[@]}" "$REPO_ROOT/vm/query_api.py" "$VM_HOST:$REMOTE_DIR/query_ap
 echo "--- 3. Run setup.sh on the VM ---"
 ssh "${SSH_OPTS[@]}" "$VM_HOST" "bash $REMOTE_DIR/vm/setup.sh"
 
-echo "--- 4. Restart service ---"
-ssh "${SSH_OPTS[@]}" "$VM_HOST" "sudo systemctl restart freed-chat-query"
-
-echo "--- 5. Verify healthz from the Mac ---"
+echo "--- 4. Verify healthz from the Mac ---"
 sleep 2
 curl -sS -m 10 "http://$VM_PUBLIC_IP:8157/healthz"
 echo ""
