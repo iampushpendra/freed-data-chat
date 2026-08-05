@@ -1,0 +1,313 @@
+<title>Analyst — Architecture &amp; Data Flow</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#f5f7f7; --panel:#ffffff; --ink:#0f1c1b; --muted:#5a6b69;
+    --line:#dde5e4; --accent:#0f766e; --accent-2:#0891b2; --hero:#101a33;
+    --good:#0f766e; --warn:#b45309; --crit:#b91c1c;
+    --code-bg:#0f1c1b; --code-ink:#d7e6e3;
+    --mono:ui-monospace,"SF Mono",Menlo,"Cascadia Code",Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0b1211; --panel:#111b19; --ink:#e7f0ee; --muted:#93a6a3;
+      --line:#1e2c2a; --accent:#2dd4bf; --accent-2:#38bdf8; --hero:#0a1120;
+      --code-bg:#0a1210; --code-ink:#cfe6e1;
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#f5f7f7; --panel:#ffffff; --ink:#0f1c1b; --muted:#5a6b69;
+    --line:#dde5e4; --accent:#0f766e; --accent-2:#0891b2;
+    --code-bg:#0f1c1b; --code-ink:#d7e6e3;
+  }
+  :root[data-theme="dark"]{
+    --bg:#0b1211; --panel:#111b19; --ink:#e7f0ee; --muted:#93a6a3;
+    --line:#1e2c2a; --accent:#2dd4bf; --accent-2:#38bdf8;
+    --code-bg:#0a1210; --code-ink:#cfe6e1;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;
+    -webkit-font-smoothing:antialiased;font-size:16px}
+  .wrap{max-width:960px;margin:0 auto;padding:0 20px}
+  a{color:var(--accent)}
+  code,kbd{font-family:var(--mono);font-size:.86em}
+  .mono{font-family:var(--mono)}
+
+  /* hero */
+  header.hero{background:
+      radial-gradient(120% 140% at 85% -20%, rgba(45,212,191,.18), transparent 60%),
+      linear-gradient(180deg,var(--hero),#0c1426);
+    color:#e8f3f1;border-bottom:1px solid var(--line)}
+  .hero .wrap{padding:44px 20px 40px}
+  .badge{display:inline-flex;align-items:center;gap:9px;font-family:var(--mono);font-size:12px;
+    letter-spacing:.14em;text-transform:uppercase;color:#8fe9db;opacity:.9}
+  .badge .dot{width:8px;height:8px;border-radius:50%;background:#2dd4bf;box-shadow:0 0 0 4px rgba(45,212,191,.18)}
+  h1{font-size:clamp(28px,5vw,42px);line-height:1.08;margin:16px 0 6px;text-wrap:balance;letter-spacing:-.02em}
+  .hero p.lede{color:#b6ccc8;max-width:60ch;margin:0 0 20px;font-size:17px}
+  .facts{display:flex;flex-wrap:wrap;gap:10px}
+  .fact{background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.10);border-radius:10px;
+    padding:9px 13px;font-size:13px;color:#d6e7e4}
+  .fact b{color:#fff;font-weight:600}
+  .fact .k{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:#7fb8b0;margin-bottom:2px}
+
+  section{padding:40px 0;border-bottom:1px solid var(--line)}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:0 0 6px}
+  h2{font-size:24px;margin:0 0 4px;letter-spacing:-.01em}
+  h2 + p.sub{color:var(--muted);margin:0 0 22px;max-width:66ch}
+  h3{font-size:15px;margin:0 0 8px}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px}
+  .scroll{overflow-x:auto}
+  pre.mermaid{margin:0;padding:14px;text-align:center;min-width:520px}
+  .cap{color:var(--muted);font-size:13px;margin:10px 2px 0;font-family:var(--mono)}
+
+  /* component table */
+  table{border-collapse:collapse;width:100%;font-size:14px;min-width:640px}
+  thead th{text-align:left;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--muted);font-weight:600;padding:10px 12px;border-bottom:1px solid var(--line)}
+  tbody td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  tbody tr:last-child td{border-bottom:0}
+  td .comp{font-weight:600}
+  td .path{font-family:var(--mono);font-size:12px;color:var(--muted);display:block;margin-top:2px}
+  .pill{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:999px;
+    border:1px solid var(--line);white-space:nowrap}
+  .pill.vercel{color:var(--accent-2);border-color:color-mix(in srgb,var(--accent-2) 40%,transparent)}
+  .pill.vm{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+  .pill.db{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+
+  /* security layers */
+  .layers{display:grid;gap:12px}
+  @media(min-width:680px){.layers{grid-template-columns:repeat(2,1fr)}}
+  .layer{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:10px;padding:14px 16px}
+  .layer .n{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.1em}
+  .layer h3{margin:4px 0 4px}
+  .layer p{margin:0;color:var(--muted);font-size:13.5px}
+  .layer.hard{border-left-color:var(--crit)}
+  .layer.hard .tag{color:var(--crit)}
+  .tag{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.1em}
+
+  .note{display:flex;gap:12px;background:color-mix(in srgb,var(--warn) 9%,var(--panel));
+    border:1px solid color-mix(in srgb,var(--warn) 30%,var(--line));border-radius:12px;padding:14px 16px;margin-top:22px}
+  .note .ico{font-size:18px;line-height:1.3}
+  .note p{margin:0;font-size:13.5px;color:var(--ink)}
+  .note b{color:var(--warn)}
+
+  ul.tight{margin:8px 0 0;padding-left:18px;color:var(--muted);font-size:14px}
+  ul.tight li{margin:3px 0}
+  ul.tight code{color:var(--ink)}
+
+  footer{padding:28px 0 44px;color:var(--muted);font-size:13px}
+  footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="badge"><span class="dot"></span>Analyst · as-built</span>
+    <h1>Chat-to-SQL over the FREED warehouse</h1>
+    <p class="lede">Staff ask a question in plain English. An LLM writes read-only PostgreSQL, it runs against the warehouse behind three isolation layers, and the answer comes back as a table plus a written summary.</p>
+    <div class="facts">
+      <div class="fact"><span class="k">Live</span><b>freed-data-chat.vercel.app</b></div>
+      <div class="fact"><span class="k">Frontend</span>Vercel (separate project)</div>
+      <div class="fact"><span class="k">LLM</span>OpenAI gpt-4o</div>
+      <div class="fact"><span class="k">Bridge</span>Cloudflare Tunnel (outbound)</div>
+      <div class="fact"><span class="k">Data</span>Postgres · freed_app_db</div>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">01 · System</p>
+    <h2>Architecture</h2>
+    <p class="sub">Three trust zones. Secrets never cross into the browser; the browser never reaches the VM; the VM is the only thing that touches the database. The VM has <em>no inbound internet access</em>—its firewall admits office/VPN only—so Vercel reaches it through a tunnel the VM dials outward.</p>
+    <div class="panel scroll">
+<pre class="mermaid">
+flowchart TB
+  subgraph B["🌐 Browser (any @freed staff)"]
+    UI["Analyst UI<br/>web/index.html<br/>login · chat · tables · CSV"]
+  end
+  subgraph V["▲ Vercel — project: freed-data-chat"]
+    L["/api/login<br/>password → signed HttpOnly cookie"]
+    C["/api/chat<br/>OpenAI tool-loop · run_sql<br/>system prompt = context/schema.md"]
+  end
+  O["OpenAI API<br/>gpt-4o"]
+  T(["Cloudflare Tunnel<br/>outbound from VM · TLS"])
+  subgraph M["🖥️ VM 172.20.4.15 — firewalled to office/VPN"]
+    NX["nginx :8157"]
+    API["query_api.py :8158<br/>bearer auth · SELECT-only validator<br/>read-only session · 60s · 2000 rows"]
+  end
+  DB[("PostgreSQL 172.20.12.9<br/>freed_app_db · == Metabase db 27<br/>read-only user freedbi_user")]
+
+  UI -- "cookie" --> L
+  UI -- "POST messages" --> C
+  C <-- "tool calls" --> O
+  C -- "SQL + Bearer secret" --> T
+  T --> NX --> API --> DB
+  DB -- "rows" --> API -- "JSON" --> C -- "reply + tables" --> UI
+</pre>
+    </div>
+    <p class="cap">Solid path = one question, end to end. Every hop left→right adds an isolation boundary.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">02 · Request lifecycle</p>
+    <h2>What happens when you ask a question</h2>
+    <p class="sub">A single message runs an OpenAI tool loop: the model proposes SQL, the VM runs it read-only, the result feeds back, and the model writes the answer. Capped at 3 queries and a ~55&nbsp;s budget so it always returns before Vercel's 60&nbsp;s function limit.</p>
+    <div class="panel scroll">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as Browser
+  participant CH as /api/chat
+  participant AI as OpenAI
+  participant VM as query_api (VM)
+  participant PG as Warehouse
+  U->>CH: messages + auth cookie
+  CH->>CH: verify HMAC cookie (else 401)
+  CH->>AI: prompt + schema.md + run_sql tool
+  AI-->>CH: run_sql("SELECT … LIMIT …")
+  CH->>VM: POST /query + Bearer  (15s timeout)
+  VM->>VM: validate: single SELECT/WITH only
+  VM->>PG: read-only session · 60s · cap 2000
+  PG-->>VM: rows
+  VM-->>CH: {columns, rows, truncated}
+  CH->>AI: tool result (rows)
+  AI-->>CH: final answer (markdown)
+  CH-->>U: {reply, tables[]}
+  U->>U: render table + CSV + SQL disclosure
+</pre>
+    </div>
+    <p class="cap">On a SQL error the VM returns 422 and the model self-corrects (still within the 3-query cap). If the VM is unreachable, the reply says so rather than hanging.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">03 · Components</p>
+    <h2>The moving parts, as deployed</h2>
+    <p class="sub">Each piece has one job and a well-defined interface. Nothing here is a framework—the VM service is Python stdlib, the Vercel functions are plain Node with no runtime dependencies.</p>
+    <div class="panel scroll">
+      <table>
+        <thead><tr><th>Component</th><th>Zone</th><th>Responsibility</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="comp">Analyst UI</span><span class="path">web/index.html</span></td>
+            <td><span class="pill vercel">Vercel</span></td>
+            <td>Self-contained page (no CDN). Login, chat, markdown render with HTML-escaping, result tables, formula-injection-safe CSV, SQL disclosure.</td>
+          </tr>
+          <tr>
+            <td><span class="comp">Login</span><span class="path">api/login.js</span></td>
+            <td><span class="pill vercel">Vercel</span></td>
+            <td>Checks shared password, issues an HMAC-signed HttpOnly cookie (7-day).</td>
+          </tr>
+          <tr>
+            <td><span class="comp">Chat / tool loop</span><span class="path">api/chat.js</span></td>
+            <td><span class="pill vercel">Vercel</span></td>
+            <td>Verifies cookie, runs the OpenAI <code>run_sql</code> loop (≤3 calls, timeouts, overall deadline), returns reply + every result table.</td>
+          </tr>
+          <tr>
+            <td><span class="comp">LLM context</span><span class="path">context/schema.md</span></td>
+            <td><span class="pill vercel">Vercel</span></td>
+            <td>~78k-char system prompt: live warehouse schema, glossary, 25 DAX-derived metric recipes, model map, company rules.</td>
+          </tr>
+          <tr>
+            <td><span class="comp">Tunnel</span><span class="path">analyst-quicktunnel.service</span></td>
+            <td><span class="pill vm">Bridge</span></td>
+            <td>cloudflared dials outward → public HTTPS URL. No inbound port opened. (Interim quick tunnel; named tunnel is a drop-in upgrade.)</td>
+          </tr>
+          <tr>
+            <td><span class="comp">Query API</span><span class="path">vm/query_api.py · :8158</span></td>
+            <td><span class="pill vm">VM</span></td>
+            <td>Bearer auth, SELECT/WITH-only validator, read-only session, row cap, statement timeout, JSON audit log. Python stdlib + psycopg2.</td>
+          </tr>
+          <tr>
+            <td><span class="comp">nginx vhost</span><span class="path">vm/nginx-chatquery.conf · :8157</span></td>
+            <td><span class="pill vm">VM</span></td>
+            <td>Fronts the API, no-store headers, timeouts. Public bind but firewalled to office/VPN.</td>
+          </tr>
+          <tr>
+            <td><span class="comp">Warehouse</span><span class="path">freed_app_db · 172.20.12.9</span></td>
+            <td><span class="pill db">Postgres</span></td>
+            <td>Same data as Metabase db&nbsp;27. Queried by read-only user <code>freedbi_user</code>. Schemas: helixmongo, spinereadmongo, dcpreadmongo, insightreadmongo.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">04 · Security</p>
+    <h2>Four layers, one hard boundary</h2>
+    <p class="sub">A bug in any single layer is contained by the next. The last layer is the one that makes a write physically impossible regardless of what the LLM emits.</p>
+    <div class="layers">
+      <div class="layer">
+        <div class="n">LAYER 1 · <span class="tag">access</span></div>
+        <h3>Shared password + signed cookie</h3>
+        <p>Only holders of the passphrase get a session. The cookie is HMAC-signed and HttpOnly—it can't be forged or read by scripts.</p>
+      </div>
+      <div class="layer">
+        <div class="n">LAYER 2 · <span class="tag">transport</span></div>
+        <h3>Bearer secret, VM off the internet</h3>
+        <p>Vercel→VM carries a bearer secret; the VM accepts inbound only from office/VPN and is reached via an outbound tunnel. No open DB port on the internet.</p>
+      </div>
+      <div class="layer">
+        <div class="n">LAYER 3 · <span class="tag">validation</span></div>
+        <h3>SELECT / WITH-only validator</h3>
+        <p>Single-statement guard; rejects DML/DDL, stacked queries, <code>E''</code> escape strings, <code>set_config</code>, large-object &amp; file functions. 90 unit tests.</p>
+      </div>
+      <div class="layer hard">
+        <div class="n">LAYER 4 · <span class="tag">hard boundary</span></div>
+        <h3>Read-only Postgres session</h3>
+        <p>Runs as a read-only BI user in a <code>read only</code> transaction with a 60&nbsp;s statement timeout and a 2000-row cap. A write is impossible even if layer 3 were bypassed.</p>
+      </div>
+    </div>
+    <div class="note">
+      <div class="ico">🛡️</div>
+      <p><b>Defense in depth, on purpose.</b> Layers 3 and 4 are independent: the validator blocks the query <em>class</em>, and even a query that slipped past it lands in a transaction that cannot mutate data. A Critical stacked-query bypass found in review was closed at layer 3 before launch and re-verified against 14 exploit strings.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">05 · Stack &amp; scope</p>
+    <h2>Choices &amp; boundaries</h2>
+    <div class="layers">
+      <div class="layer" style="border-left-color:var(--accent-2)">
+        <h3>Deliberately separate Vercel project</h3>
+        <p>Its own project ID, so a deploy here can never overwrite the existing dashboard's auto-deploy pipeline.</p>
+      </div>
+      <div class="layer" style="border-left-color:var(--accent-2)">
+        <h3>No frameworks in the hot path</h3>
+        <p>VM = Python stdlib <code>http.server</code> + psycopg2. Vercel functions = plain Node, zero runtime deps. Small surface, easy to audit.</p>
+      </div>
+      <div class="layer" style="border-left-color:var(--accent-2)">
+        <h3>Knowledge lives in one file</h3>
+        <p>Widen what Analyst knows by editing <code>context/schema.md</code> and redeploying Vercel—no VM change needed.</p>
+      </div>
+      <div class="layer" style="border-left-color:var(--muted)">
+        <h3>v1 scope</h3>
+        <p>Warehouse (Postgres) only; Mongo sources not exposed. 3 queries / message, 60&nbsp;s, 2000 rows in-browser (full set in CSV).</p>
+      </div>
+    </div>
+    <h3 style="margin:22px 0 4px">Two known follow-ups</h3>
+    <ul class="tight">
+      <li>Tunnel is an interim <code>*.trycloudflare.com</code> quick tunnel (ephemeral URL). Upgrade to a stable named tunnel via <code>vm/tunnel_setup.sh</code> after one <code>cloudflared tunnel login</code>.</li>
+      <li>OpenAI key is currently reused from the sibling Note-Analyser tool; swap in a dedicated key by updating the Vercel env var.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Analyst — FREED data chat · architecture as built 2026-08-04</span>
+    <span class="mono">Vercel · Cloudflare · VM · PostgreSQL</span>
+  </div>
+</footer>
+

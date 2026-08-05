@@ -65,7 +65,8 @@ async function callOpenAI(apiKey, model, messages, allowTools = true) {
   const body = {
     model,
     messages,
-    temperature: 0.1,
+    temperature: 0,
+    seed: 7,
   };
   if (allowTools) {
     body.tools = [
