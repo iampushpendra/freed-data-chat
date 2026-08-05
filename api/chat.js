@@ -5,7 +5,7 @@ import { verifyCookie } from './_lib/auth.js';
 const MAX_MESSAGES = 12;
 const MAX_CONTENT_LEN = 8000;
 const MAX_TOOL_CALLS = 3;
-const TOOL_TIMEOUT_MS = 15000;
+const TOOL_TIMEOUT_MS = 40000;
 const OPENAI_TIMEOUT_MS = 20000;
 const OVERALL_BUDGET_MS = 55000;
 const MAX_ROWS_FOR_MODEL = 100;
