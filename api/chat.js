@@ -31,10 +31,33 @@ function loadSchema() {
 
 function buildSystemPrompt() {
   const schema = loadSchema();
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
   return `You are the FREED Data Chat assistant. You answer FREED staff questions about
 company data by querying the FREED Postgres warehouse via the run_sql tool.
 
+Today's date is ${today} (Asia/Kolkata). The warehouse is LIVE: it is updated
+continuously from the production systems and contains current data right up to
+today. Ignore any training-cutoff intuition about what year it is — trust this
+date and the database.
+
 ${schema}
+
+Data-freshness rules (important — do not violate):
+- NEVER claim the data "only goes up to" some past year, is "not available"
+  after a date, or is stale, unless a query result actually shows that. If you
+  are unsure of the available date range for a table, run
+  \`SELECT max(...), min(...)\` on its date column to check — do not guess.
+- For relative dates ("today", "last week", "this month", "last 7 days"), derive
+  the bounds from \`now()\` / \`current_date\` in SQL. Never hardcode a year you
+  assume is "current".
+- If a query returns zero rows, that means no matching rows for those filters —
+  not that the data ends. Re-examine the filters (wrong status/milestone value,
+  too-narrow window) before concluding anything about coverage.
 
 Hard rules:
 - The database is PostgreSQL. Write PostgreSQL-dialect SQL only.
@@ -116,13 +139,9 @@ async function callOpenAI(apiKey, model, messages, allowTools = true) {
   }
 }
 
-async function runSql(sql) {
-  const url = process.env.QUERY_API_URL;
-  const secret = process.env.QUERY_API_SECRET;
-
+async function runSqlOnce(sql, url, secret) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TOOL_TIMEOUT_MS);
-
   try {
     const resp = await fetch(url, {
       method: 'POST',
@@ -144,15 +163,45 @@ async function runSql(sql) {
     if (resp.status === 200 && data) {
       return { ok: true, data };
     }
+    // SQL rejected/failed → feed back to the model to self-correct (not an outage).
     if ((resp.status === 400 || resp.status === 422) && data) {
       return { ok: false, error: data.error || 'query rejected' };
     }
-    return { ok: false, error: `data backend error (status ${resp.status})`, backendDown: true };
-  } catch {
-    return { ok: false, error: 'data backend unavailable', backendDown: true };
+    // 5xx / other → transient, worth one retry.
+    return { ok: false, error: `data backend error (status ${resp.status})`, transient: true };
+  } catch (err) {
+    // Our own timeout: the query took too long. Not an outage — tell the model
+    // to narrow the range; it can retry within the tool-call budget.
+    if (err && err.name === 'AbortError') {
+      return {
+        ok: false,
+        error:
+          'query timed out (it scanned too much data). Narrow the time range or add more selective filters, then try again.',
+        timedOut: true,
+      };
+    }
+    // Network/DNS/connection error → transient, worth one retry.
+    return { ok: false, error: 'data backend connection failed', transient: true };
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function runSql(sql) {
+  const url = process.env.QUERY_API_URL;
+  const secret = process.env.QUERY_API_SECRET;
+
+  let res = await runSqlOnce(sql, url, secret);
+  // Retry exactly once on a transient connection/5xx blip (covers tunnel
+  // hiccups). Do NOT retry timeouts (would double the wait) or SQL errors.
+  if (!res.ok && res.transient) {
+    res = await runSqlOnce(sql, url, secret);
+    // If still transient after the retry, treat as a real outage.
+    if (!res.ok && res.transient) {
+      return { ok: false, error: 'data backend unavailable', backendDown: true };
+    }
+  }
+  return res;
 }
 
 export default async function handler(req, res) {
