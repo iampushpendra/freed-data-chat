@@ -9,6 +9,7 @@ const TOOL_TIMEOUT_MS = 40000;
 const OPENAI_TIMEOUT_MS = 20000;
 const OVERALL_BUDGET_MS = 55000;
 const MAX_ROWS_FOR_MODEL = 100;
+const MAX_QUESTION_LEN = 500;
 const BACKEND_DOWN_REPLY =
   "⚠️ The data backend is currently unavailable, so I couldn't run the query. Please try again shortly.";
 
@@ -139,7 +140,7 @@ async function callOpenAI(apiKey, model, messages, allowTools = true) {
   }
 }
 
-async function runSqlOnce(sql, url, secret) {
+async function runSqlOnce(sql, url, secret, question, chatId) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TOOL_TIMEOUT_MS);
   try {
@@ -149,7 +150,7 @@ async function runSqlOnce(sql, url, secret) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${secret}`,
       },
-      body: JSON.stringify({ sql }),
+      body: JSON.stringify({ sql, question, chat_id: chatId }),
       signal: controller.signal,
     });
 
@@ -187,15 +188,15 @@ async function runSqlOnce(sql, url, secret) {
   }
 }
 
-async function runSql(sql) {
+async function runSql(sql, question, chatId) {
   const url = process.env.QUERY_API_URL;
   const secret = process.env.QUERY_API_SECRET;
 
-  let res = await runSqlOnce(sql, url, secret);
+  let res = await runSqlOnce(sql, url, secret, question, chatId);
   // Retry exactly once on a transient connection/5xx blip (covers tunnel
   // hiccups). Do NOT retry timeouts (would double the wait) or SQL errors.
   if (!res.ok && res.transient) {
-    res = await runSqlOnce(sql, url, secret);
+    res = await runSqlOnce(sql, url, secret, question, chatId);
     // If still transient after the retry, treat as a real outage.
     if (!res.ok && res.transient) {
       return { ok: false, error: 'data backend unavailable', backendDown: true };
@@ -252,6 +253,12 @@ export default async function handler(req, res) {
 
     const model = process.env.OPENAI_MODEL || 'gpt-4o';
     const systemPrompt = buildSystemPrompt();
+
+    // Correlation id + originating question for the VM audit log (logging
+    // metadata only — never used for anything else in this handler).
+    const chatId = crypto.randomUUID();
+    const lastUserMessage = [...trimmed].reverse().find((m) => m.role === 'user');
+    const currentQuestion = (lastUserMessage?.content || '').slice(0, MAX_QUESTION_LEN);
 
     const conversation = [
       { role: 'system', content: systemPrompt },
@@ -329,7 +336,7 @@ export default async function handler(req, res) {
         }
 
         toolCallsUsed++;
-        const result = await runSql(sql);
+        const result = await runSql(sql, currentQuestion, chatId);
 
         if (result.ok) {
           const rows = Array.isArray(result.data.rows) ? result.data.rows : [];

@@ -12,7 +12,9 @@ from decimal import Decimal
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from query_api import validate_sql, json_safe  # noqa: E402
+from query_api import (  # noqa: E402
+    validate_sql, json_safe, build_audit_record, QUESTION_MAX_LEN, CHAT_ID_MAX_LEN,
+)
 
 
 class TestValidateSqlAllowed(unittest.TestCase):
@@ -345,6 +347,46 @@ class TestJsonSafe(unittest.TestCase):
         result = json_safe(value)
         self.assertEqual(result, value)
         self.assertIsInstance(result, list)
+
+
+class TestBuildAuditRecord(unittest.TestCase):
+    """build_audit_record() is the pure helper that attaches the optional
+    "question"/"chat_id" logging-only metadata to an audit-log record."""
+
+    def test_includes_question_and_chat_id_when_provided(self):
+        base = {'ts': 't', 'req_id': 'abc', 'sql': 'SELECT 1'}
+        record = build_audit_record(base, question='how many users?', chat_id='chat-123')
+        self.assertEqual(record['question'], 'how many users?')
+        self.assertEqual(record['chat_id'], 'chat-123')
+
+    def test_null_when_omitted(self):
+        base = {'ts': 't', 'req_id': 'abc', 'sql': 'SELECT 1'}
+        record = build_audit_record(base)
+        self.assertIsNone(record['question'])
+        self.assertIsNone(record['chat_id'])
+
+    def test_does_not_mutate_base(self):
+        base = {'ts': 't'}
+        build_audit_record(base, question='q', chat_id='c')
+        self.assertEqual(base, {'ts': 't'})
+
+    def test_preserves_base_fields(self):
+        base = {'ts': 't', 'req_id': 'abc', 'sql': 'SELECT 1', 'row_count': 5}
+        record = build_audit_record(base, question='q', chat_id='c')
+        self.assertEqual(record['ts'], 't')
+        self.assertEqual(record['req_id'], 'abc')
+        self.assertEqual(record['sql'], 'SELECT 1')
+        self.assertEqual(record['row_count'], 5)
+
+    def test_question_truncated_to_max_len(self):
+        long_question = 'x' * (QUESTION_MAX_LEN + 500)
+        record = build_audit_record({}, question=long_question)
+        self.assertEqual(len(record['question']), QUESTION_MAX_LEN)
+
+    def test_chat_id_truncated_to_max_len(self):
+        long_chat_id = 'y' * (CHAT_ID_MAX_LEN + 50)
+        record = build_audit_record({}, chat_id=long_chat_id)
+        self.assertEqual(len(record['chat_id']), CHAT_ID_MAX_LEN)
 
 
 if __name__ == '__main__':

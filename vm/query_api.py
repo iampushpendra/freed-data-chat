@@ -27,7 +27,15 @@ Security model
 
 Endpoints
   GET  /healthz  (no auth) -> {"ok": true, "db": "up"|"down"}
-  POST /query    (bearer)  -> {"sql": "<string>"}
+  POST /query    (bearer)  -> {"sql": "<string>",
+                               "question": "<string, optional>",
+                               "chat_id": "<string, optional>"}
+                 "question"/"chat_id" are OPTIONAL logging-only metadata (the
+                 originating natural-language question and a per-request
+                 correlation id from the Vercel chat handler): they are never
+                 interpolated into SQL and never affect validation or
+                 execution, only the audit-log record. Older/other callers
+                 that omit them are unaffected.
                  200 {"columns", "rows", "row_count", "truncated", "elapsed_ms"}
                  400 {"error": "<validator message>"}   SQL rejected before execution
                  422 {"error": "<postgres error message>"}  SQL ran and failed
@@ -79,11 +87,38 @@ BIND_PORT = int(os.getenv('BIND_PORT', '8158'))
 # it here. AUDIT_LOG remains overridable via the env file.
 AUDIT_LOG = os.getenv('AUDIT_LOG', './chat-query.log')
 
+# Sane caps for the optional "question"/"chat_id" logging-only body fields
+# (see build_audit_record() below). These are metadata only: they are never
+# validated as SQL-affecting input and never interpolated into any query.
+QUESTION_MAX_LEN = 1000
+CHAT_ID_MAX_LEN = 64
+
 _audit_lock = threading.Lock()
 
 
 def log(msg):
     print(f"[{datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
+
+
+def _cap(value, max_len):
+    """Coerce `value` to a length-capped string, or None if `value` is None.
+    Used only for logging metadata -- never for anything SQL/validation
+    related."""
+    if value is None:
+        return None
+    return str(value)[:max_len]
+
+
+def build_audit_record(base, question=None, chat_id=None):
+    """Pure helper: return a new audit-log record dict that is `base` plus
+    the optional "question"/"chat_id" logging-only metadata fields, capped
+    to sane lengths. Always sets both keys explicitly (null when the caller
+    didn't supply a value) so every /query audit line has a consistent
+    shape. Does not mutate `base`."""
+    record = dict(base)
+    record['question'] = _cap(question, QUESTION_MAX_LEN)
+    record['chat_id'] = _cap(chat_id, CHAT_ID_MAX_LEN)
+    return record
 
 
 def audit(record):
@@ -486,33 +521,53 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {'error': 'body must be JSON'})
 
         sql = payload.get('sql') if isinstance(payload, dict) else None
+        # "question"/"chat_id" are OPTIONAL logging-only metadata (see module
+        # docstring). They are read here purely to attach to the audit
+        # record via build_audit_record() -- they never influence validation
+        # or execution below, and a non-string value is simply dropped
+        # rather than rejected.
+        question = payload.get('question') if isinstance(payload, dict) else None
+        if not isinstance(question, str):
+            question = None
+        chat_id = payload.get('chat_id') if isinstance(payload, dict) else None
+        if not isinstance(chat_id, str):
+            chat_id = None
+
         if not isinstance(sql, str):
-            audit({'ts': datetime.now(timezone.utc).isoformat(), 'req_id': req_id,
-                   'error': '"sql" must be a string', 'stage': 'validate',
-                   'elapsed_ms': elapsed_ms(), 'remote_ip': remote_ip})
+            audit(build_audit_record({
+                'ts': datetime.now(timezone.utc).isoformat(), 'req_id': req_id,
+                'error': '"sql" must be a string', 'stage': 'validate',
+                'elapsed_ms': elapsed_ms(), 'remote_ip': remote_ip},
+                question=question, chat_id=chat_id))
             return self._send(400, {'error': '"sql" must be a string'})
 
         err = validate_sql(sql)
         if err:
-            audit({'ts': datetime.now(timezone.utc).isoformat(), 'req_id': req_id,
-                   'sql': sql, 'error': err, 'stage': 'validate',
-                   'elapsed_ms': elapsed_ms(), 'remote_ip': remote_ip})
+            audit(build_audit_record({
+                'ts': datetime.now(timezone.utc).isoformat(), 'req_id': req_id,
+                'sql': sql, 'error': err, 'stage': 'validate',
+                'elapsed_ms': elapsed_ms(), 'remote_ip': remote_ip},
+                question=question, chat_id=chat_id))
             return self._send(400, {'error': err})
 
         try:
             result = run_query(sql)
         except Exception as e:
             msg = str(e).strip() or type(e).__name__
-            audit({'ts': datetime.now(timezone.utc).isoformat(), 'req_id': req_id,
-                   'sql': sql, 'error': msg, 'stage': 'execute',
-                   'elapsed_ms': elapsed_ms(), 'remote_ip': remote_ip})
+            audit(build_audit_record({
+                'ts': datetime.now(timezone.utc).isoformat(), 'req_id': req_id,
+                'sql': sql, 'error': msg, 'stage': 'execute',
+                'elapsed_ms': elapsed_ms(), 'remote_ip': remote_ip},
+                question=question, chat_id=chat_id))
             return self._send(422, {'error': msg})
 
         result['elapsed_ms'] = elapsed_ms()
-        audit({'ts': datetime.now(timezone.utc).isoformat(), 'req_id': req_id,
-               'sql': sql, 'row_count': result['row_count'],
-               'truncated': result['truncated'], 'elapsed_ms': result['elapsed_ms'],
-               'remote_ip': remote_ip})
+        audit(build_audit_record({
+            'ts': datetime.now(timezone.utc).isoformat(), 'req_id': req_id,
+            'sql': sql, 'row_count': result['row_count'],
+            'truncated': result['truncated'], 'elapsed_ms': result['elapsed_ms'],
+            'remote_ip': remote_ip},
+            question=question, chat_id=chat_id))
         return self._send(200, result)
 
 

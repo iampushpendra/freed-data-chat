@@ -1,0 +1,412 @@
+version: 1
+# Golden set for the FREED "Analyst" data chatbot.
+#
+# Each case maps a natural-language question to the canonical SQL recipe for
+# the business metric it should resolve to, per context/schema.md's
+# "DERIVED BUSINESS METRICS" section (25 metrics) and its "Example Q -> SQL"
+# section. See docs/CONTRACTS.md for the query-API contract and README.md's
+# "Evaluating answer quality" section for how to run this suite.
+#
+# Fields:
+#   id            kebab-case, unique
+#   question      a realistic natural-language question a FREED staffer might ask
+#   canonical_sql verified KB SQL, runnable as-is against the query API
+#   match         scalar | rowcount | resultset
+#                   scalar    - single number, compared with `tolerance` (fraction)
+#                   rowcount  - only the row_count needs to match
+#                   resultset - order-independent set compare of stringified rows
+#   tolerance     (scalar only) allowed relative difference, e.g. 0.0 = exact
+#   kb_ref        which metric / section of context/schema.md this comes from
+#   enabled       true to run in --full mode; false + skip_reason to record-but-skip
+#
+# Date windows: "last 7 days" / "last quarter" use the KB's own now()-relative
+# definitions verbatim (context/schema.md answering rule #2) so the canonical
+# value and the chatbot's live answer are computed against the same "now".
+# Metrics with no natural rolling window use a fixed literal month
+# (2026-07-01..2026-08-01) for determinism across repeated runs.
+
+cases:
+  # --- Funnel & conversion -------------------------------------------------
+
+  - id: signups-last-7-days
+    question: "How many leads signed up in the last 7 days?"
+    canonical_sql: |
+      SELECT COUNT(DISTINCT lt."leadRefId") AS signup_count
+      FROM helixmongo.lead_trail AS lt
+      WHERE lt."milestone" = 'SIGN_UP' AND lt."status" = 'COMPLETED'
+        AND (lt."startTime")::timestamptz >= now() - interval '7 days'
+      LIMIT 1;
+    match: scalar
+    tolerance: 0.0
+    kb_ref: "schema.md Example Q->SQL #1 / Metric #1 Signup Count"
+    enabled: true
+
+  - id: signup-count-july-2026
+    question: "How many signups did we have in July 2026?"
+    canonical_sql: |
+      SELECT COUNT(DISTINCT lt."leadRefId") AS signup_count
+      FROM helixmongo.lead_trail AS lt
+      WHERE lt."milestone" = 'SIGN_UP' AND lt."status" = 'COMPLETED'
+        AND (lt."startTime")::timestamptz >= '2026-07-01'
+        AND (lt."startTime")::timestamptz <  '2026-08-01'
+      LIMIT 1;
+    match: scalar
+    tolerance: 0.0
+    kb_ref: "Metric #1 Signup Count - Verified"
+    enabled: true
+
+  - id: credit-pull-count-july-2026
+    question: "How many completed credit pulls happened in July 2026?"
+    canonical_sql: |
+      SELECT COUNT(DISTINCT lt."leadRefId") AS credit_pull_count
+      FROM helixmongo.lead_trail AS lt
+      WHERE lt."milestone" IN ('CREDIT_PULL_SINGLE_USE', 'CREDIT_PULL')
+        AND lt."status" = 'COMPLETED'
+        AND (lt."startTime")::timestamptz >= '2026-07-01'
+        AND (lt."startTime")::timestamptz <  '2026-08-01'
+      LIMIT 1;
+    match: scalar
+    tolerance: 0.0
+    kb_ref: "Metric #2 Credit Pull Count - Verified"
+    enabled: true
+
+  - id: signup-to-credit-pull-pct-july-2026
+    question: "What percentage of July 2026 signups went on to complete a credit pull?"
+    canonical_sql: |
+      WITH s AS (
+        SELECT COUNT(DISTINCT lt."leadRefId") AS n
+        FROM helixmongo.lead_trail AS lt
+        WHERE lt."milestone" = 'SIGN_UP' AND lt."status" = 'COMPLETED'
+          AND (lt."startTime")::timestamptz >= '2026-07-01' AND (lt."startTime")::timestamptz < '2026-08-01'
+      ), cp AS (
+        SELECT COUNT(DISTINCT lt."leadRefId") AS n
+        FROM helixmongo.lead_trail AS lt
+        WHERE lt."milestone" IN ('CREDIT_PULL_SINGLE_USE','CREDIT_PULL') AND lt."status" = 'COMPLETED'
+          AND (lt."startTime")::timestamptz >= '2026-07-01' AND (lt."startTime")::timestamptz < '2026-08-01'
+      )
+      SELECT ROUND(100.0 * cp.n / NULLIF(s.n,0), 2) AS signup_to_cp_pct FROM s, cp LIMIT 1;
+    match: scalar
+    tolerance: 0.01
+    kb_ref: "Metric #3 Signup -> Credit Pull % - Verified (composes #1 and #2)"
+    enabled: true
+
+  - id: credit-pull-by-month-2026
+    question: "What's the credit-pull volume by month for 2026?"
+    canonical_sql: |
+      SELECT
+          date_trunc('month', (lt."startTime")::timestamptz)::date AS month,
+          COUNT(*) AS credit_pulls
+      FROM helixmongo.lead_trail AS lt
+      WHERE lt."milestone" IN ('CREDIT_PULL_SINGLE_USE', 'CREDIT_PULL')
+        AND lt."status" = 'COMPLETED'
+        AND lt."startTime" >= '2026-01-01'
+      GROUP BY 1
+      ORDER BY 1
+      LIMIT 100;
+    match: resultset
+    kb_ref: "schema.md Example Q->SQL #2"
+    enabled: true
+
+  - id: active-clients-by-program
+    question: "How many active clients does each program (DRP vs DCP) have?"
+    canonical_sql: |
+      SELECT cf."programCode", COUNT(*) AS active_files
+      FROM spinereadmongo.client_file AS cf
+      WHERE cf."clientFileStatus" = 'ACTIVE'
+      GROUP BY 1
+      ORDER BY 2 DESC
+      LIMIT 50;
+    match: resultset
+    kb_ref: "schema.md Example Q->SQL #3"
+    enabled: true
+
+  - id: leads-convert-dedup
+    question: "How many leads created since the start of 2026 have converted into a client file, counting distinct leads (not raw rows)?"
+    canonical_sql: |
+      SELECT
+          COUNT(*) AS total_lead_clientfile_rows,
+          COUNT(DISTINCT l."leadRefId") AS distinct_leads
+      FROM helixmongo.lead AS l
+      JOIN spinereadmongo.client AS c ON c."leadRefId" = l."leadRefId"
+      JOIN spinereadmongo.client_file AS cf ON cf."client_oid" = c."_id"
+      WHERE l."createdAt" >= '2026-01-01'
+      LIMIT 1;
+    match: resultset
+    kb_ref: "schema.md Example Q->SQL #6 (fan-out de-dup pattern)"
+    enabled: true
+
+  # --- Settlement -----------------------------------------------------------
+
+  - id: settlement-case-split
+    question: "What share of settlement plans are Platform (Case 1) vs Direct (Case 2/3)?"
+    canonical_sql: |
+      WITH plan_case AS (
+          SELECT
+              sp."_id" AS plan_id,
+              CASE
+                  WHEN COALESCE(SUM(se."amountFromTrustToCreditor"), 0) > 0 THEN 'Platform (Case 1)'
+                  WHEN COALESCE(SUM(se."amountFromTrustToClient"), 0) > 0 THEN 'Direct - Bank Rejected (Case 2)'
+                  WHEN COALESCE(SUM(se."amountFromClientToCreditor"), 0) > 0 THEN 'Direct - Insufficient SPA (Case 3)'
+                  ELSE 'Unclassified'
+              END AS settlement_case
+          FROM spinereadmongo.s_t_plan AS sp
+          LEFT JOIN spinereadmongo.s_t_entry AS se
+              ON se."stPlan_oid" = sp."_id" AND se."isArchived" IS DISTINCT FROM 'true'
+          WHERE sp."isArchived" IS DISTINCT FROM 'true'
+          GROUP BY sp."_id"
+      )
+      SELECT settlement_case, COUNT(*) AS plans,
+             ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS pct
+      FROM plan_case
+      GROUP BY settlement_case
+      ORDER BY plans DESC
+      LIMIT 10;
+    match: resultset
+    kb_ref: "Metric #17 Settlement Case Split - Verified (also schema.md Example Q->SQL #4)"
+    enabled: true
+
+  - id: emandate-success-rate
+    question: "What's our overall e-mandate success rate?"
+    canonical_sql: |
+      WITH ranked AS (
+        SELECT em.*, CASE
+          WHEN em."status" = 'ACTIVE' THEN 'Success'
+          WHEN em."status" IN ('DRAFTED','PENDING') THEN 'In-Process'
+          ELSE 'Failed' END AS final_status
+        FROM spinereadmongo.e_mandate AS em
+      )
+      SELECT COUNT(DISTINCT "clientFile_oid") FILTER (WHERE final_status='Success') AS success_clients,
+             COUNT(DISTINCT "clientFile_oid") AS total_clients,
+             ROUND(100.0 * COUNT(DISTINCT "clientFile_oid") FILTER (WHERE final_status='Success')
+               / NULLIF(COUNT(DISTINCT "clientFile_oid"),0), 2) AS success_pct
+      FROM ranked LIMIT 1;
+    match: resultset
+    kb_ref: "Metric #19 e-Mandate Success Rate - Verified (mostly; DRAFTED/PENDING bucket unconfirmed)"
+    enabled: true
+
+  - id: aom-count-july-2026
+    question: "How many clients hit AOM (first e-mandate activation) in July 2026?"
+    canonical_sql: |
+      SELECT COUNT(DISTINCT cfp."clientFileNumber") AS aom_count
+      FROM spinereadmongo.client_file_progress AS cfp
+      WHERE cfp."firstEMandateActivatedAt" IS NOT NULL
+        AND (cfp."firstEMandateActivatedAt")::timestamptz >= '2026-07-01'
+        AND (cfp."firstEMandateActivatedAt")::timestamptz <  '2026-08-01'
+      LIMIT 1;
+    match: scalar
+    tolerance: 0.0
+    kb_ref: "Metric #20 AOM Count - Verified"
+    enabled: true
+
+  # --- Revenue & fees ---------------------------------------------------------
+
+  - id: pff-total-last-quarter
+    question: "Total PFF collected in the last quarter?"
+    canonical_sql: |
+      SELECT SUM(pe."amount") AS total_pff
+      FROM spinereadmongo.payment_entry AS pe
+      WHERE pe."txnPurpose" = 'PFF'
+        AND pe."fromAccountEntity" = 'TRUST'
+        AND pe."toAccountEntity" = 'KFS'
+        AND pe."paymentEntryStatus" = 'SETTLED'
+        AND (pe."settledAt")::timestamptz >= date_trunc('quarter', now()) - interval '3 months'
+        AND (pe."settledAt")::timestamptz <  date_trunc('quarter', now())
+      LIMIT 1;
+    match: scalar
+    tolerance: 0.0
+    kb_ref: "schema.md Example Q->SQL #5"
+    enabled: true
+
+  - id: service-fee-net-july-2026
+    question: "What was our net service fee revenue (in lacs) for July 2026, after refunds?"
+    canonical_sql: |
+      SELECT (SUM(pe."amount") FILTER (WHERE pe."toAccountEntity"='KFS')
+            - COALESCE(SUM(pe."amount") FILTER (WHERE pe."fromAccountEntity"='KFS'), 0)) / 1e5 / 1.18
+        AS service_fee_net_lacs
+      FROM spinereadmongo.payment_entry AS pe
+      WHERE pe."txnPurpose" = 'SERVICE_FEE' AND pe."paymentEntryStatus" = 'SETTLED'
+        AND (pe."settledAt")::timestamptz >= '2026-07-01'
+        AND (pe."settledAt")::timestamptz <  '2026-08-01'
+      LIMIT 1;
+    match: scalar
+    tolerance: 0.001
+    kb_ref: "Metric #8 Service Fee, net of refund - Verified"
+    enabled: true
+
+  - id: pff-net-july-2026
+    question: "How much net PFF (platform fee, excl. GST, in lacs) did we collect in July 2026?"
+    canonical_sql: |
+      SELECT SUM(pe."amount") / 1.18 / 1e5 AS pff_net_lacs
+      FROM spinereadmongo.payment_entry AS pe
+      WHERE pe."txnPurpose" = 'PFF' AND pe."fromAccountEntity" = 'TRUST'
+        AND pe."toAccountEntity" = 'KFS' AND pe."paymentEntryStatus" = 'SETTLED'
+        AND (pe."settledAt")::timestamptz >= '2026-07-01'
+        AND (pe."settledAt")::timestamptz <  '2026-08-01'
+      LIMIT 1;
+    match: scalar
+    tolerance: 0.001
+    kb_ref: "Metric #9 Platform Fee / PFF, net - Verified"
+    enabled: true
+
+  - id: onboarding-fee-net-july-2026
+    question: "What was net onboarding fee revenue (in lacs) for July 2026?"
+    canonical_sql: |
+      SELECT (SUM(pe."amount") FILTER (WHERE pe."toAccountEntity"='KFS')
+            - COALESCE(SUM(pe."amount") FILTER (WHERE pe."fromAccountEntity"='KFS'), 0)) / 1e5 AS onboarding_fee_net_lacs
+      FROM spinereadmongo.payment_entry AS pe
+      WHERE pe."txnPurpose" = 'ONBOARDING_FEE' AND pe."paymentEntryStatus" = 'SETTLED'
+        AND (pe."settledAt")::timestamptz >= '2026-07-01'
+        AND (pe."settledAt")::timestamptz <  '2026-08-01'
+      LIMIT 1;
+    match: scalar
+    tolerance: 0.001
+    kb_ref: "Metric #10 Onboarding Fee, net of refund - Verified (same pattern as #8)"
+    enabled: true
+
+  - id: msf-legacy-total
+    question: "How much MSF (legacy monthly service fee) has been collected all-time?"
+    canonical_sql: |
+      SELECT SUM(pe."amount") AS msf_total
+      FROM spinereadmongo.payment_entry AS pe
+      WHERE pe."txnPurpose" = 'MSF' AND pe."toAccountEntity" = 'KFS'
+        AND pe."paymentEntryStatus" = 'SETTLED'
+      LIMIT 1;
+    match: scalar
+    tolerance: 0.0
+    kb_ref: "Metric #11 MSF - legacy revenue - Verified but deprecated"
+    enabled: true
+
+  # --- Disabled: Approximated / Unmapped metrics -----------------------------
+  # These are recorded for completeness but excluded from pass/fail scoring:
+  # the KB itself flags the underlying DAX logic depends on columns/tables not
+  # confirmed to exist in freed_app_db, so there is no single ground-truth
+  # answer to grade the chatbot against.
+
+  - id: drp-eligible-credit-pull-pct
+    question: "What percentage of credit pulls this month were for DRP-eligible leads?"
+    canonical_sql: |
+      SELECT COUNT(DISTINCT lt."leadRefId") AS drp_eligible_pulls
+      FROM helixmongo.lead_trail AS lt
+      JOIN helixmongo.lead_vital AS lv ON lv."leadRefId" = lt."leadRefId"
+      WHERE lt."milestone" IN ('CREDIT_PULL_SINGLE_USE','CREDIT_PULL')
+        AND lt."status" = 'COMPLETED' AND lv."programProfile" = 'DRP_Eligible'
+        AND (lt."startTime")::timestamptz >= '2026-07-01'
+        AND (lt."startTime")::timestamptz <  '2026-08-01'
+      LIMIT 1;
+    match: scalar
+    tolerance: 0.0
+    kb_ref: "Metric #4 DRP-/DCP-Eligible Credit Pull % - Approximated"
+    enabled: false
+    skip_reason: "lead_vital.programProfile is not confirmed to hold the literal value 'DRP_Eligible' live; KB flags this as needing confirmation before trusting."
+
+  - id: net-clients-cancelled-pct
+    question: "Of clients who hit AOM in July 2026, what percent ended up cancelled?"
+    canonical_sql: |
+      WITH cohort AS (
+        SELECT cf."clientFileStatus"
+        FROM spinereadmongo.client_file AS cf
+        JOIN spinereadmongo.client_file_progress AS cfp
+          ON cfp."clientFileNumber" = cf."clientFileNumber"
+        WHERE (cfp."firstEMandateActivatedAt")::timestamptz >= '2026-07-01'
+          AND (cfp."firstEMandateActivatedAt")::timestamptz <  '2026-08-01'
+      )
+      SELECT COUNT(*) AS net_clients,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE "clientFileStatus" IN
+          ('CANCELLED','PENDING_CANCELLED','AGREEMENT_SIGNED')) / NULLIF(COUNT(*),0), 2)
+          AS cancelled_pct
+      FROM cohort LIMIT 1;
+    match: resultset
+    kb_ref: "Metric #6 Net Clients / Cancelled Clients % - Approximated"
+    enabled: false
+    skip_reason: "DAX 'Status2' bucketing has no warehouse mirror; approximated with clientFileStatus, so the number is directional only, not a ground truth to grade against."
+
+  - id: settled-debt-pct
+    question: "What percentage of AOM'd clients' outstanding debt has been settled?"
+    canonical_sql: |
+      WITH first_plan AS (
+        SELECT sp.*, ROW_NUMBER() OVER (
+          PARTITION BY sp."clientFile_oid" ORDER BY sp."draftDate") AS rn
+        FROM spinereadmongo.s_t_plan AS sp
+        WHERE sp."isArchived" IS DISTINCT FROM 'true'
+      )
+      SELECT
+        (SELECT SUM("totalOutstanding") FROM first_plan WHERE rn = 1) AS settled_debt,
+        (SELECT SUM(cf."totalCurrentOutstanding") FROM spinereadmongo.client_file cf
+           WHERE cf."isFirstEMandateDone" = 'true') AS net_debt
+      LIMIT 1;
+    match: resultset
+    kb_ref: "Metric #13 Settled Debt % - Approximated"
+    enabled: false
+    skip_reason: "Depends on PBI's RANKX-based SettlementNoByDate, approximated with ROW_NUMBER over draftDate; not a verified equivalent."
+
+  - id: spa-balance-distribution
+    question: "Show me the distribution of client accounts by current SPA/trust balance."
+    canonical_sql: |
+      SELECT
+        CASE WHEN cfc."spaBalance" <= 5000   THEN '0. <=5K'
+             WHEN cfc."spaBalance" <= 25000  THEN '1. 5K-25K'
+             WHEN cfc."spaBalance" <= 50000  THEN '2. 25K-50K'
+             WHEN cfc."spaBalance" <= 100000 THEN '3. 50K-1L'
+             WHEN cfc."spaBalance" <= 250000 THEN '4. 1L-2.5L'
+             ELSE '5. 2.5L+' END AS spa_balance_bucket,
+        COUNT(DISTINCT cfc."clientFileNumber") AS num_accounts,
+        SUM(cfc."totalIncomingAmountToTrust") AS total_incoming,
+        SUM(cfc."collectedByKFS") AS collected_by_kfs,
+        SUM(cfc."refundedToClient") AS refunded_to_client,
+        SUM(cfc."spaBalance") AS spa_balance_left
+      FROM spinereadmongo.client_file_consolidation AS cfc
+      WHERE cfc."spaBalance" > 0
+      GROUP BY 1 ORDER BY 1 LIMIT 20;
+    match: resultset
+    kb_ref: "Metric #14 SPA Balance Distribution - Approximated"
+    enabled: false
+    skip_reason: "Bucket cut points are illustrative, not the verified PBI cut points (KB: 'confirm with the business owner')."
+
+  - id: dcp-sql-qualification
+    question: "Which DCP leads currently qualify as DCP-SQL?"
+    canonical_sql: |
+      WITH unsecured AS (
+        SELECT dc."client_oid", SUM(dc."currentBalance") AS unsecured_balance
+        FROM dcpreadmongo.dcp_cl_creditor AS dc
+        WHERE dc."accountType" = 'UNSECURED' GROUP BY 1
+      )
+      SELECT cf."client_oid",
+        CASE WHEN (
+            (cf."dateCreated" < '2026-04-01' AND cf."firstRecordedSalary" >= 35000)
+            OR (cf."dateCreated" >= '2026-04-01' AND cf."firstRecordedSalary" >= 50000))
+          AND cf."creditScore" >= 700
+          AND COALESCE(u.unsecured_balance,0) >= 100000
+          AND lower(cf."firstRecordedEmploymentType") IN ('salaried','salaired','saliried')
+        THEN 'Yes' ELSE 'No' END AS is_dcp_sql
+      FROM dcpreadmongo.dcp_client_file AS cf
+      LEFT JOIN unsecured AS u ON u."client_oid" = cf."client_oid"
+      LIMIT 200;
+    match: resultset
+    kb_ref: "Metric #24 DCP-SQL Qualification - Approximated"
+    enabled: false
+    skip_reason: "References dcp_client_file.firstRecordedSalary/firstRecordedEmploymentType/dateCreated, none of which are in context/schema.md's documented column list for that table - names are inferred, not confirmed live."
+
+  - id: cohort-churn-unmapped
+    question: "What's our cumulative cohort churn rate for Credit Insights subscribers?"
+    canonical_sql: |
+      -- No canonical SQL exists: lead_subscription / lead_payment are not
+      -- documented in context/schema.md at all (only referenced via the
+      -- Power BI model map). Placeholder only - never execute.
+      SELECT 1 AS unmapped_placeholder LIMIT 1;
+    match: scalar
+    tolerance: 0.0
+    kb_ref: "Metrics #21-23 Cohort Size / Subscription Initialized-Activated-Cancelled / Cumulative Cohort Churn % - Unmapped"
+    enabled: false
+    skip_reason: "Depends on helixmongo.lead_subscription / lead_payment, tables not documented in context/schema.md's warehouse section at all - KB explicitly flags this as unmapped, needing a live information_schema check before any query can be trusted."
+
+  - id: hot-warm-cold-lead-temperature
+    question: "How many HOT leads do we have right now?"
+    canonical_sql: |
+      -- No canonical SQL exists: HOT/WARM/COLD lead temperature lives outside
+      -- freed_app_db in a separate call-analysis pipeline. Placeholder only.
+      SELECT 1 AS unmapped_placeholder LIMIT 1;
+    match: scalar
+    tolerance: 0.0
+    kb_ref: "schema.md glossary: HOT/WARM/COLD lead temperature - Unmapped by design"
+    enabled: false
+    skip_reason: "Lives outside freed_app_db in a separate call-analysis pipeline; the KB's own answering rule says to say so rather than invent a computation from this warehouse."

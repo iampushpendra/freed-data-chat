@@ -151,3 +151,67 @@ test/test_vm_query.sh   # needs QUERY_API_URL + QUERY_API_SECRET exported
   request overall.
 - **3 tool calls** (`run_sql` invocations) max per chat message, so the model
   can self-correct on a SQL error once or twice but cannot loop forever.
+
+## Evaluating answer quality
+
+`evals/` holds a repeatable check for whether the chatbot's generated SQL is
+*correct* — not just "runs without erroring" — by comparing it against
+verified canonical SQL for named business metrics.
+
+- **`evals/golden.yaml`** — the golden set. Seeded from `context/schema.md`'s
+  "DERIVED BUSINESS METRICS" section (25 Power-BI-derived metric recipes) and
+  its "Example Q → SQL" section. Each case has:
+  - `id` — kebab-case, unique
+  - `question` — a realistic natural-language question a FREED staffer might ask
+  - `canonical_sql` — the verified KB SQL recipe, runnable as-is
+  - `match` — `scalar` (single number, compared with `tolerance` as a
+    relative fraction), `rowcount` (row count only), or `resultset`
+    (order-independent set compare of stringified rows)
+  - `kb_ref` — which metric/section of `context/schema.md` it comes from
+  - `enabled` — `true` to run in `--full` mode; `false` + `skip_reason` for
+    metrics the KB itself flags as *Approximated* or *Unmapped* (no
+    warehouse-verified ground truth to grade against), so they're recorded
+    but never fail the suite
+- **Adding a case**: pick a metric or question, find its recipe in
+  `context/schema.md`, add an entry to the `cases:` list following the shape
+  above. Run `--canonical-only` first to confirm the SQL still executes
+  cleanly against the live warehouse before enabling it.
+
+### Running the harness
+
+`evals/run_evals.py` is pure-stdlib Python 3 (no `pip install` needed).
+
+```bash
+# Fast, no-LLM regression check: does each enabled case's canonical SQL
+# still run cleanly against the live warehouse?
+QUERY_API_URL=https://<tunnel-or-vm>/query \
+QUERY_API_SECRET=<secret> \
+python3 evals/run_evals.py --canonical-only
+
+# Full end-to-end: log into the live chatbot, ask it each case's question,
+# and compare its answer to the canonical value.
+QUERY_API_URL=https://<tunnel-or-vm>/query \
+QUERY_API_SECRET=<secret> \
+BASE_URL=https://freed-data-chat.vercel.app \
+CHAT_PASSWORD=<shared password> \
+python3 evals/run_evals.py --full --json evals/report.json
+```
+
+Config is env-var driven: `QUERY_API_URL` / `QUERY_API_SECRET` (canonical
+execution, both modes), `BASE_URL` (chatbot, default
+`https://freed-data-chat.vercel.app`), `CHAT_PASSWORD` (`--full` only).
+Per-request timeouts default to 70s — some warehouse aggregates over
+20M+-row tables take 20-30s to return.
+
+### Reading the report
+
+- `--canonical-only` prints `[OK]`/`[ERROR]`/`[SKIP]` per case with elapsed
+  time and the value it got back, then a summary line. Exits nonzero if any
+  *enabled* case's canonical SQL errors — that means the KB recipe has
+  drifted from the live schema and needs fixing.
+- `--full` prints `[PASS]`/`[FAIL]`/`[SKIP]` per case, showing the question
+  asked, both SQL strings (canonical vs. what the bot generated), and both
+  values, then a summary. Exits nonzero if any enabled case fails — wire
+  this into CI as the answer-quality gate.
+- `--json <path>` writes the same data as structured JSON alongside the
+  terminal output, for diffing runs over time or feeding a dashboard.

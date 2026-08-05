@@ -16,6 +16,7 @@ Repo root: `/Users/pushpendrasingh/projects/freed-data-chat`
 - Per-connection: `SET statement_timeout` from env (default `60s`), `SET default_transaction_read_only = on`. Rows capped at `ROW_CAP` (default 2000, fetch cap+1 to set `truncated`). Values JSON-safe: Decimal→float, date/datetime→ISO string, None→null, other→str.
 - Env file `/etc/freed/chat-query.env`: `PG_HOST PG_PORT PG_DB PG_USER PG_PASSWORD QUERY_API_SECRET ROW_CAP STATEMENT_TIMEOUT BIND_HOST BIND_PORT`
 - Audit log: one JSON line per request to `/home/ubuntu/freed-data-chat/chat-query.log` (ts, req id, sql, row_count/error, elapsed_ms, remote ip).
+- `POST /query` body may optionally include `question` (originating natural-language question, ≤1000 chars) and `chat_id` (per-request correlation id, ≤64 chars) — logging-only metadata recorded in the audit log (`null` when absent); never validated, never interpolated into SQL, never affects execution.
 
 ## Vercel serverless (`api/*.js`)
 - Node 20 CommonJS or ESM (pick one, be consistent; package.json `"type"` accordingly). No heavy deps; `openai` npm package allowed, or raw fetch.
