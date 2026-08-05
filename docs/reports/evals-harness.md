@@ -22,7 +22,7 @@ No files under `api/`, `vm/`, or `web/` were touched. No commit was made.
 ## Canonical-only self-test result
 
 Ran against the live query API
-(`https://locking-engage-ordered-sic.trycloudflare.com/query`):
+(`https://<your-tunnel-host>/query`):
 
 ```
 python3 evals/run_evals.py --canonical-only

@@ -1,7 +1,7 @@
 # Analyst — Live Runbook
 
 **Live site:** https://freed-data-chat.vercel.app
-**Shared password:** `Analyst@Freed2026`  (change anytime — see below)
+**Shared password:** set in Vercel env `CHAT_PASSWORD` (ask an admin; rotate via the steps below)
 
 Ask plain-English data questions → Analyst writes read-only PostgreSQL against
 the warehouse (`freed_app_db`), runs it, and returns a table + summary.
