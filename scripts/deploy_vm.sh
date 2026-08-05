@@ -4,9 +4,9 @@
 # vhost), and verifies healthz from outside the VM.
 set -euo pipefail
 
-SSH_KEY="$HOME/installs/keys/freed-live-gcp.pem"
-VM_HOST="ubuntu@172.20.4.15"
-VM_PUBLIC_IP="34.100.177.202"
+SSH_KEY="${VM_SSH_KEY:-$HOME/.ssh/vm_key.pem}"
+VM_HOST="${VM_HOST:?set VM_HOST to the VM ssh host, e.g. ubuntu@1.2.3.4}"
+VM_PUBLIC_IP="${VM_PUBLIC_IP:?set VM_PUBLIC_IP to the VM public IP}"
 REMOTE_DIR="/home/ubuntu/freed-data-chat"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

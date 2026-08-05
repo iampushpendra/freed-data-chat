@@ -22,7 +22,7 @@ VARS=(
   QUERY_API_SECRET
 )
 
-DEFAULT_QUERY_API_URL="http://34.100.177.202:8157/query"
+DEFAULT_QUERY_API_URL="http://${VM_PUBLIC_IP:-<vm-public-ip>}:8157/query"
 
 echo "=== Freed Data Chat — set Vercel production env vars ==="
 

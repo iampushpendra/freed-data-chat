@@ -21,9 +21,9 @@ import argparse
 import json
 import sys
 
-VM_HOST = "ubuntu@172.20.4.15"
+VM_HOST = "$VM_HOST"
 VM_LOG_PATH = "/home/ubuntu/freed-data-chat/chat-query.log"
-SSH_KEY = "~/installs/keys/freed-live-gcp.pem"
+SSH_KEY = "$VM_SSH_KEY"
 
 QUESTION_COL_WIDTH = 60
 

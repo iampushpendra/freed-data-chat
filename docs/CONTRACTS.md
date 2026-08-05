@@ -20,7 +20,7 @@ Repo root: `/Users/pushpendrasingh/projects/freed-data-chat`
 
 ## Vercel serverless (`api/*.js`)
 - Node 20 CommonJS or ESM (pick one, be consistent; package.json `"type"` accordingly). No heavy deps; `openai` npm package allowed, or raw fetch.
-- Env vars: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4o`), `CHAT_PASSWORD`, `CHAT_COOKIE_SECRET`, `QUERY_API_URL` (e.g. `http://34.100.177.202:8157/query`), `QUERY_API_SECRET`.
+- Env vars: `OPENAI_API_KEY`, `OPENAI_MODEL` (default `gpt-4o`), `CHAT_PASSWORD`, `CHAT_COOKIE_SECRET`, `QUERY_API_URL` (e.g. `http://<vm-public-ip>:8157/query`), `QUERY_API_SECRET`.
 - `POST /api/login` `{password}` → on match set cookie `fdc_auth=<exp>.<hmacSHA256(exp, CHAT_COOKIE_SECRET)>` (exp = unix seconds now+7d), `HttpOnly; Path=/; Max-Age=604800; SameSite=Lax; Secure`, return `{ok:true}`. Wrong → 401 `{ok:false}`.
 - `POST /api/chat` — requires valid cookie (verify HMAC + not expired; else 401).
   Body: `{messages: [{role:"user"|"assistant", content:"..."}]}` (client sends trimmed history, last 12 messages max).
@@ -39,5 +39,5 @@ Repo root: `/Users/pushpendrasingh/projects/freed-data-chat`
 - Rewrites: `/` → `/web/index.html`. Functions default runtime; `api/chat.js` maxDuration 60.
 
 ## Warehouse facts
-- Postgres 172.20.12.9:5432 db `freed_app_db`, user `freedbi_user` (already read-only BI user). Reachable ONLY from the VM.
-- VM: ubuntu@172.20.4.15 (ssh key ~/installs/keys/freed-live-gcp.pem from the Mac), public IP 34.100.177.202. Ports 8155/8156 taken; 8157/8158 free.
+- Postgres <warehouse-host>:5432 db `freed_app_db`, user `<readonly-db-user>` (already read-only BI user). Reachable ONLY from the VM.
+- VM: ubuntu@<vm-host> (ssh key <ssh-key-path> from the Mac), public IP <vm-public-ip>. Ports 8155/8156 taken; 8157/8158 free.

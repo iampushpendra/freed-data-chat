@@ -1,14 +1,14 @@
 #!/bin/bash
 # Direct smoke test of the VM query API (vm/query_api.py), bypassing Vercel.
 #
-# Requires QUERY_API_URL (e.g. http://34.100.177.202:8157/query) and
+# Requires QUERY_API_URL (e.g. http://<vm-public-ip>:8157/query) and
 # QUERY_API_SECRET exported.
 #
 # Prints PASS/FAIL per step; exits non-zero if any step fails.
 
 set -uo pipefail
 
-: "${QUERY_API_URL:?QUERY_API_URL must be exported (e.g. http://34.100.177.202:8157/query)}"
+: "${QUERY_API_URL:?QUERY_API_URL must be exported (e.g. http://<vm-public-ip>:8157/query)}"
 : "${QUERY_API_SECRET:?QUERY_API_SECRET must be exported}"
 
 PASS=0

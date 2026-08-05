@@ -16,7 +16,7 @@ Browser ──password cookie──> Vercel "freed-data-chat"
    chat UI (static)             /api/chat  (serverless, Node)
                                    │  OpenAI tool-calling loop (run_sql)
                                    ▼
-                            VM (34.100.177.202) nginx vhost → FastAPI :8157 (127.0.0.1)
+                            VM (<vm-public-ip>) nginx vhost → FastAPI :8157 (127.0.0.1)
                                 Bearer secret · single-statement SELECT/WITH only
                                 read-only PG role chat_ro · statement_timeout 60s
                                 row cap 2,000 · JSON-lines audit log

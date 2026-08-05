@@ -464,7 +464,7 @@ LIMIT 1;
 > `Apptrove_Dim_flags.dax`, `tables/*.tmdl`). Ground truth for table/column
 > names: `context/schema.md` (live `freed_app_db`; schemas `helixmongo`,
 > `spinereadmongo`, `dcpreadmongo`, `insightreadmongo`). **This pass had no
-> network path to the live VM** (`ssh ubuntu@172.20.4.15` timed out from this
+> network path to the live VM** (`ssh ubuntu@<vm-host>` timed out from this
 > sandbox) — nothing below was freshly re-verified with `information_schema`.
 > Recipes built only from names already confirmed in `schema.md` are marked
 > Verified; anything needing a name not in `schema.md` is Approximated or
@@ -848,7 +848,7 @@ at all); Apptrove event flags (confirmed external-API-only); HOT/WARM/COLD
 lead temperature (confirmed by `schema.md` to live outside the warehouse).
 
 **Environment constraint**: this pass had no network route to the live VM
-(`ssh ubuntu@172.20.4.15` timed out), so nothing above was freshly confirmed
+(`ssh ubuntu@<vm-host>` timed out), so nothing above was freshly confirmed
 via `information_schema` + `LIMIT 5` samples as intended. "Verified" entries
 rest on `schema.md`'s prior verification, not a new live check this session.
 Before trusting the Approximated/Unmapped entries in production, spot-check

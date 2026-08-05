@@ -14,7 +14,7 @@ Browser ──password cookie──> Vercel "freed-data-chat"
    chat UI (static)             /api/chat  (serverless, Node)
                                    │  OpenAI tool-calling loop (run_sql)
                                    ▼
-                            VM (34.100.177.202) nginx vhost → query API :8157 (127.0.0.1:8158)
+                            VM (<vm-public-ip>) nginx vhost → query API :8157 (127.0.0.1:8158)
                                 Bearer secret · single-statement SELECT/WITH only
                                 read-only PG role · statement_timeout 60s
                                 row cap 2,000 · JSON-lines audit log
@@ -64,6 +64,13 @@ test/e2e.sh https://freed-data-chat.vercel.app
 test/test_vm_query.sh   # needs QUERY_API_URL + QUERY_API_SECRET exported
 ```
 
+## Configuration
+
+Real infrastructure values (VM host/IP, SSH key path, warehouse host, etc.)
+are never committed to this repo. Copy `.env.example` to `.env` (or export
+the vars another way) and fill in the actual values for your environment
+before running the deploy/test scripts below.
+
 ## Environment variables
 
 ### Vercel (serverless, `api/*.js`)
@@ -74,17 +81,17 @@ test/test_vm_query.sh   # needs QUERY_API_URL + QUERY_API_SECRET exported
 | `OPENAI_MODEL` | no | `gpt-4o` | chat-completions model id |
 | `CHAT_PASSWORD` | yes | — | shared password gating the whole app |
 | `CHAT_COOKIE_SECRET` | yes | — | HMAC key signing the `fdc_auth` cookie |
-| `QUERY_API_URL` | yes | `http://34.100.177.202:8157/query` | VM query API endpoint |
+| `QUERY_API_URL` | yes | `http://<vm-public-ip>:8157/query` | VM query API endpoint |
 | `QUERY_API_SECRET` | yes | — | bearer token the VM query API requires |
 
 ### VM (`/etc/freed/chat-query.env`)
 
 | Var | Required | Default | Notes |
 |---|---|---|---|
-| `PG_HOST` | yes | — | Postgres host (warehouse, `172.20.12.9`) |
+| `PG_HOST` | yes | — | Postgres host (warehouse, `<warehouse-host>`) |
 | `PG_PORT` | yes | — | Postgres port (`5432`) |
 | `PG_DB` | yes | — | `freed_app_db` |
-| `PG_USER` | yes | — | read-only role, e.g. `freedbi_user`/`chat_ro` |
+| `PG_USER` | yes | — | read-only role, e.g. `<readonly-db-user>`/`chat_ro` |
 | `PG_PASSWORD` | yes | — | password for `PG_USER` |
 | `QUERY_API_SECRET` | yes | — | must match Vercel's `QUERY_API_SECRET` |
 | `ROW_CAP` | no | `2000` | max rows returned per query |
@@ -114,7 +121,7 @@ test/test_vm_query.sh   # needs QUERY_API_URL + QUERY_API_SECRET exported
   keywords, and blocks `pg_sleep`, `dblink`, `pg_read_file`, `lo_*`. A
   trailing `;` is tolerated but any additional `;` outside a string literal
   is rejected (no stacked statements).
-- **HTTP-not-HTTPS caveat**: the Vercel → VM leg (`http://34.100.177.202:8157`)
+- **HTTP-not-HTTPS caveat**: the Vercel → VM leg (`http://<vm-public-ip>:8157`)
   is currently plain HTTP. The bearer secret and query payloads are visible
   to anything on the network path between Vercel and the VM's public IP.
   This is an accepted short-term risk, not a design goal.

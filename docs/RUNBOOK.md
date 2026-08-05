@@ -9,20 +9,20 @@ the warehouse (`freed_app_db`), runs it, and returns a table + summary.
 ## Architecture (as deployed)
 
 ```
-Browser ──password cookie──> Vercel  (project: freed-data-chat, team 2ndincome)
+Browser ──password cookie──> Vercel  (project: freed-data-chat, team <vercel-team>)
   web/index.html                /api/login, /api/chat (OpenAI tool loop)
                                      │  run_sql tool, Bearer secret
                                      ▼
                           Cloudflare Tunnel  (dials OUT from the VM; no inbound port)
                                      ▼
-                          VM 172.20.4.15  freed-chat-query.service  (127.0.0.1:8158)
+                          VM <vm-host>  freed-chat-query.service  (127.0.0.1:8158)
                                 SELECT/WITH-only validator · read-only PG · 60s · 2000 rows
                                      ▼
-                          Postgres warehouse 172.20.12.9 / freed_app_db
+                          Postgres warehouse <warehouse-host> / freed_app_db
 ```
 
 Why the tunnel: the VM's public IP does **not** accept inbound internet traffic
-(the `freed-live-vpc` firewall admits only office/VPN ranges), so Vercel reaches
+(the `<vpc-name>` firewall admits only office/VPN ranges), so Vercel reaches
 the VM through an outbound Cloudflare tunnel instead of an opened port.
 
 ## ⚠️ Current state: interim quick tunnel
@@ -45,7 +45,7 @@ updated. Upgrade to a stable named tunnel when convenient:
    delegation pattern.)
 3. Point Vercel at the stable host (the script prints these exact commands).
 
-To read the current interim URL: `ssh …@172.20.4.15 'grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" ~/freed-data-chat/quicktunnel.log | head -1'`
+To read the current interim URL: `ssh …@<vm-host> 'grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" ~/freed-data-chat/quicktunnel.log | head -1'`
 
 ## Everyday ops
 

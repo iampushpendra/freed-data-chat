@@ -134,11 +134,11 @@ flowchart TB
   end
   O["OpenAI API<br/>gpt-4o"]
   T(["Cloudflare Tunnel<br/>outbound from VM · TLS"])
-  subgraph M["🖥️ VM 172.20.4.15 — firewalled to office/VPN"]
+  subgraph M["🖥️ VM <vm-host> — firewalled to office/VPN"]
     NX["nginx :8157"]
     API["query_api.py :8158<br/>bearer auth · SELECT-only validator<br/>read-only session · 60s · 2000 rows"]
   end
-  DB[("PostgreSQL 172.20.12.9<br/>freed_app_db · == Metabase db 27<br/>read-only user freedbi_user")]
+  DB[("PostgreSQL <warehouse-host><br/>freed_app_db · == Metabase db 27<br/>read-only user <readonly-db-user>")]
 
   UI -- "cookie" --> L
   UI -- "POST messages" --> C
@@ -230,9 +230,9 @@ sequenceDiagram
             <td>Fronts the API, no-store headers, timeouts. Public bind but firewalled to office/VPN.</td>
           </tr>
           <tr>
-            <td><span class="comp">Warehouse</span><span class="path">freed_app_db · 172.20.12.9</span></td>
+            <td><span class="comp">Warehouse</span><span class="path">freed_app_db · &lt;warehouse-host&gt;</span></td>
             <td><span class="pill db">Postgres</span></td>
-            <td>Same data as Metabase db&nbsp;27. Queried by read-only user <code>freedbi_user</code>. Schemas: helixmongo, spinereadmongo, dcpreadmongo, insightreadmongo.</td>
+            <td>Same data as Metabase db&nbsp;27. Queried by read-only user <code>&lt;readonly-db-user&gt;</code>. Schemas: helixmongo, spinereadmongo, dcpreadmongo, insightreadmongo.</td>
           </tr>
         </tbody>
       </table>

@@ -40,8 +40,8 @@
   `/home/ubuntu/freed-data-chat/` since the systemd unit's `ExecStart` and
   `setup.sh`'s existence check both expect it one level up from `vm/`), runs
   `setup.sh` over ssh, `sudo systemctl restart freed-chat-query`, then curls
-  `http://34.100.177.202:8157/healthz` from the Mac to confirm the public
-  path works end-to-end. Uses key `~/installs/keys/freed-live-gcp.pem`.
+  `http://<vm-public-ip>:8157/healthz` from the Mac to confirm the public
+  path works end-to-end. Uses key `<ssh-key-path>`.
 
 ## Checks done
 
@@ -109,8 +109,8 @@
 - **MINOR — role-name overclaim (`vm/nginx-chatquery.conf`)**: the
   access-control comment asserted the query runs "as the `chat_ro` Postgres
   role," but provisioning copies `PG_USER` verbatim from `settlement.env`,
-  which is `freedbi_user`. Hedged the wording to "a read-only Postgres role
-  (freedbi_user/chat_ro)" so the comment doesn't assert a specific role name
+  which is `<readonly-db-user>`. Hedged the wording to "a read-only Postgres role
+  (<readonly-db-user>/chat_ro)" so the comment doesn't assert a specific role name
   the provisioning flow doesn't guarantee.
 - **MINOR — redundant restart (`scripts/deploy_vm.sh`)**: removed the
   standalone `ssh ... "sudo systemctl restart freed-chat-query"` step (old

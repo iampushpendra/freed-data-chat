@@ -56,7 +56,7 @@
   already met without them.
 - `context/schema.md` — read first to align terminology/join-key warnings.
 - CHAT_*.md / FREED_BusinessContext.md — grepped for "apptrove", no hits.
-- Live DB check (SSH to `172.20.4.15`) — attempted but **failed**: SSH
+- Live DB check (SSH to `<vm-host>`) — attempted but **failed**: SSH
   timed out at the network level (host unreachable from this environment,
   likely needs VPN/bastion access). Proceeded without it; the .pq/.tmdl/.dax
   evidence (`Source Type = Web API`) was already conclusive that Apptrove

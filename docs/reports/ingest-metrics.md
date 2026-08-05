@@ -6,7 +6,7 @@
 ## Environment constraint (important)
 
 This pass had **no network route to the live VM**: `ssh -i
-~/installs/keys/freed-live-gcp.pem ubuntu@172.20.4.15` timed out from this
+<ssh-key-path> ubuntu@<vm-host>` timed out from this
 sandbox (confirmed with verbose SSH — TCP connect timeout, not an auth
 failure). No `psql`/`information_schema` verification against the live
 warehouse was possible this session. All mappings instead lean on
