@@ -1,5 +1,9 @@
 # FREED Data Chat
 
+**Current version:** 1.0.0 — see [CHANGELOG.md](CHANGELOG.md).
+
+**v1.0.0** — see [CHANGELOG.md](CHANGELOG.md) for what's new.
+
 A chat website where FREED staff ask data questions in plain English and get
 answers pulled live from the Postgres warehouse (the same data Metabase
 db 27 reads). The LLM is OpenAI (bring-your-own key); access is gated by a
